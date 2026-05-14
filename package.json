@@ -1,0 +1,19 @@
+{
+  "name": "xbox-now-playing-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Embeddable Xbox now-playing SVG card for GitHub profiles.",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch scripts/dev-server.js",
+    "preview": "node scripts/dev-server.js",
+    "vercel:dev": "vercel dev",
+    "start": "node scripts/dev-server.js"
+  },
+  "devDependencies": {
+    "vercel": "^54.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

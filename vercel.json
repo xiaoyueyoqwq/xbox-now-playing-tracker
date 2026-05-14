@@ -1,0 +1,19 @@
+{
+  "headers": [
+    {
+      "source": "/api/card",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        }
+      ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/favicon.ico",
+      "destination": "/img/favicon.svg"
+    }
+  ]
+}
