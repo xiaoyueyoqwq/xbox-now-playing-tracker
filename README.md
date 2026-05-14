@@ -71,6 +71,8 @@ Copy `.env.example` to `.env` and fill in the OpenXBL key:
 
 ```env
 OPENXBL_API_KEY=replace-me
+OPENXBL_CONTRACT=
+OPENXBL_BASE_URL=https://xbl.io/api/v2
 CACHE_TTL_SECONDS=300
 STALE_TTL_SECONDS=86400
 DEFAULT_GAMERTAG=replace-me
@@ -112,6 +114,14 @@ npm run preview
 4. Use a real gamertag in `DEFAULT_GAMERTAG` or pass `?gamertag=...` in the card URL.
 
 Keep the API key server-side. Do not put it in GitHub profile Markdown or frontend JavaScript.
+
+If you use an OpenXBL app/consumer key instead of a personal API key, set:
+
+```env
+OPENXBL_CONTRACT=100
+```
+
+The default OpenXBL base URL is `https://xbl.io/api/v2`. It can be overridden with `OPENXBL_BASE_URL` if OpenXBL changes routing or asks you to use a different host.
 
 ## Rate-Limit Strategy
 

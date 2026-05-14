@@ -5,7 +5,11 @@ import { renderCard } from "./renderer.js";
 import { getTitleArt } from "./title-art.js";
 
 const config = getConfig();
-const provider = new OpenXblProvider({ apiKey: config.openXblApiKey });
+const provider = new OpenXblProvider({
+  apiKey: config.openXblApiKey,
+  contract: config.openXblContract,
+  baseUrl: config.openXblBaseUrl,
+});
 const cache = new PresenceCache({
   ttlSeconds: config.cacheTtlSeconds,
   staleTtlSeconds: config.staleTtlSeconds,
@@ -52,7 +56,7 @@ export async function handleCardRequest(request, response) {
       gamertag,
       isOnline: false,
       status: "Provider unavailable",
-      titleName: "Xbox status unavailable",
+      titleName: "OpenXBL unavailable",
       fetchedAt: new Date().toISOString(),
     }), 60);
     console.error(`Provider request failed for ${gamertag}:`, error);

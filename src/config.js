@@ -6,6 +6,8 @@ export function getConfig(env = process.env) {
   return {
     port: Number.parseInt(env.PORT ?? "3000", 10),
     openXblApiKey: env.OPENXBL_API_KEY ?? "",
+    openXblContract: env.OPENXBL_CONTRACT ?? "",
+    openXblBaseUrl: env.OPENXBL_BASE_URL ?? "https://xbl.io/api/v2",
     cacheTtlSeconds: Number.parseInt(env.CACHE_TTL_SECONDS ?? "300", 10),
     staleTtlSeconds: Number.parseInt(env.STALE_TTL_SECONDS ?? "86400", 10),
     defaultGamertag: env.DEFAULT_GAMERTAG ?? "",
