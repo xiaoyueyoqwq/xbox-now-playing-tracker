@@ -1,4 +1,4 @@
-import { PresenceCache } from "./cache.js";
+import { createPresenceCache } from "./cache.js";
 import { getConfig } from "./config.js";
 import { OpenXblProvider } from "./openxbl.js";
 import { renderCard } from "./renderer.js";
@@ -10,7 +10,10 @@ const provider = new OpenXblProvider({
   contract: config.openXblContract,
   baseUrl: config.openXblBaseUrl,
 });
-const cache = new PresenceCache({
+const cache = createPresenceCache({
+  redisUrl: config.redisUrl,
+  redisRestUrl: config.redisRestUrl,
+  redisRestToken: config.redisRestToken,
   ttlSeconds: config.cacheTtlSeconds,
   staleTtlSeconds: config.staleTtlSeconds,
 });
@@ -33,7 +36,7 @@ export async function handleCardRequest(request, response) {
   }
 
   const cacheKey = useMock ? `mock:${gamertag}` : `openxbl:${gamertag.toLowerCase()}`;
-  const cached = forceRefresh ? { status: "miss", value: null } : cache.get(cacheKey);
+  const cached = forceRefresh ? { status: "miss", value: null } : await cache.get(cacheKey);
 
   if (cached.status === "fresh") {
     sendSvg(response, 200, renderCard(cached.value), config.cacheTtlSeconds);

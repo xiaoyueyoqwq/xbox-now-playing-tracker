@@ -60,7 +60,7 @@ Vercel Serverless Function
 Core modules:
 
 - `provider`: OpenXBL integration hidden behind a small interface.
-- `cache`: in-memory cache for warm serverless instances; Redis/KV adapter can be added later.
+- `cache`: Redis-backed cache for serverless persistence, with memory fallback for local development.
 - `title-art`: game artwork lookup through known title mappings and Microsoft Store catalog search.
 - `renderer`: SVG rendering with deterministic layout and safe escaping.
 - `api`: Vercel Serverless Function endpoints.
@@ -73,6 +73,9 @@ Copy `.env.example` to `.env` and fill in the OpenXBL key:
 OPENXBL_API_KEY=replace-me
 OPENXBL_CONTRACT=
 OPENXBL_BASE_URL=https://xbl.io/api/v2
+REDIS_URL=
+UPSTASH_REDIS_REST_URL=
+UPSTASH_REDIS_REST_TOKEN=
 CACHE_TTL_SECONDS=300
 STALE_TTL_SECONDS=86400
 DEFAULT_GAMERTAG=replace-me
@@ -82,8 +85,8 @@ PORT=3000
 ## Local Development
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 Open these URLs:
@@ -92,18 +95,18 @@ Open these URLs:
 - Real OpenXBL card: `http://localhost:3000/api/card?gamertag=YourTag`
 - Health check: `http://localhost:3000/api/health`
 
-`npm run dev` starts the local preview server with Node watch mode. Use this for normal local development.
+`pnpm dev` starts the local preview server with Node watch mode. Use this for normal local development.
 
 If you need Vercel CLI behavior specifically, use:
 
 ```bash
-npm run vercel:dev
+pnpm vercel:dev
 ```
 
 If you only want to test the function logic without watch mode, use:
 
 ```bash
-npm run preview
+pnpm preview
 ```
 
 ## What You Need To Do In OpenXBL
@@ -123,6 +126,29 @@ OPENXBL_CONTRACT=100
 
 The default OpenXBL base URL is `https://xbl.io/api/v2`. It can be overridden with `OPENXBL_BASE_URL` if OpenXBL changes routing or asks you to use a different host.
 
+## Redis Cache
+
+Production should use Redis so Vercel function instance changes do not drop cache data. Configure one of these sets:
+
+```env
+REDIS_URL=redis://default:password@host:port
+```
+
+or:
+
+```env
+REDIS_URL=https://:token@host
+```
+
+or the explicit Upstash REST variables:
+
+```env
+UPSTASH_REDIS_REST_URL=https://host
+UPSTASH_REDIS_REST_TOKEN=token
+```
+
+The Redis value is kept for `STALE_TTL_SECONDS`. Within `CACHE_TTL_SECONDS`, the card is served as fresh. After that, stale data can still be used while the provider is refreshed.
+
 ## Rate-Limit Strategy
 
 The project should treat provider requests as scarce:
@@ -133,7 +159,7 @@ The project should treat provider requests as scarce:
 - Prefer `stale-while-revalidate` behavior when the provider is unavailable.
 - Return valid SVG even when provider data is missing or stale.
 
-Important Vercel note: in-memory cache only persists while a serverless instance stays warm. That is fine for local development and a first deployment, but a public GitHub profile card should eventually use Vercel KV, Upstash Redis, or another shared cache to avoid quota spikes across cold starts and multiple regions.
+Local development falls back to memory cache when Redis is not configured. Production should set Redis environment variables.
 
 ## Game Artwork
 

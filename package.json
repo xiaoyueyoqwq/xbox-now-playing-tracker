@@ -2,6 +2,7 @@
   "name": "xbox-now-playing-tracker",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@11.1.2",
   "description": "Embeddable Xbox now-playing SVG card for GitHub profiles.",
   "type": "module",
   "scripts": {
@@ -15,5 +16,9 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.38.0",
+    "redis": "^4.7.1"
   }
 }

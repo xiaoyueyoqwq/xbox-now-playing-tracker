@@ -5,6 +5,8 @@
 - Primary output should be an image-friendly endpoint, likely SVG, that can be embedded in Markdown:
   `![Xbox Now Playing](https://.../api/card?gamertag=...)`
 - The card should show whether the player is online and, when available, the current title being played.
+- Use pnpm package manager
+- Use Redis for production card cache; in-memory cache is only a local fallback.
 
 ## Product Constraints
 - Design for GitHub profile usage first: unauthenticated public image requests, fast response, cacheable output.
