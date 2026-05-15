@@ -96,6 +96,7 @@ async function loadPresence(gamertag, useMock) {
     ...presence,
     titleName: presence.titleName || art?.titleName || "",
     titleArtUrl: art?.imageUrl || "",
+    titleHeroUrl: art?.heroUrl || "",
     titleArtSource: art?.source || "",
   };
 }

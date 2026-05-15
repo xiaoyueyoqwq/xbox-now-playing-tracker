@@ -165,8 +165,8 @@ Local development falls back to memory cache when Redis is not configured. Produ
 
 The card can render a game icon when artwork is available:
 
-- Known Xbox title IDs are resolved locally first.
-- Unknown titles use Microsoft Store catalog autosuggest by title name.
+- Xbox title IDs are resolved through Microsoft Store catalog lookup first.
+- Unknown or unmapped titles use Microsoft Store catalog autosuggest by title name.
 - If artwork lookup fails, the renderer falls back to the Xbox glyph.
 
 This keeps the OpenXBL presence integration separate from store artwork lookup and avoids depending on one unofficial endpoint for every field.

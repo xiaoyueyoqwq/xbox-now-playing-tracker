@@ -1,9 +1,12 @@
 const STORE_AUTOSUGGEST_URL = "https://displaycatalog.mp.microsoft.com/v7.0/productFamilies/autosuggest";
+const STORE_LOOKUP_URL = "https://displaycatalog.mp.microsoft.com/v7.0/products/lookup";
 
 const KNOWN_TITLE_ART = new Map([
   ["1794566092", {
     titleName: "Minecraft Launcher",
-    imageUrl: "https://store-images.s-microsoft.com/image/apps.31326.13510798885735219.3dfb176a-2479-4b17-ab6e-418794f3932d.a8aae002-3be2-4cd4-9ca3-b3e2e7e14882",
+    imageUrl: "https://store-images.s-microsoft.com/image/apps.1815.14247769038588514.a7fa20d7-bc1c-464b-bf78-16dfcd742fe5.20b70e8c-ab2e-45b9-b8c3-2390ebb38f59",
+    heroUrl: "https://store-images.s-microsoft.com/image/apps.42446.14247769038588514.a7fa20d7-bc1c-464b-bf78-16dfcd742fe5.1aa80fc8-cf92-43f6-9efb-17fa817cf339",
+    productId: "9PGW18NPBZV5",
     source: "known",
   }],
 ]);
@@ -23,20 +26,38 @@ export async function getTitleArt({ titleId, titleName, fetchImpl = fetch }) {
     return artCache.get(cacheKey);
   }
 
+  if (normalizedTitleId) {
+    const titleIdArt = await lookupMicrosoftStoreByTitleId(normalizedTitleId, fetchImpl);
+    if (titleIdArt) {
+      artCache.set(cacheKey, titleIdArt);
+      return titleIdArt;
+    }
+  }
+
+  if (normalizedTitleName) {
+    const storeArt = await searchMicrosoftStore(normalizedTitleName, fetchImpl);
+    if (storeArt) {
+      artCache.set(cacheKey, storeArt);
+      return storeArt;
+    }
+  }
+
   const knownArt = KNOWN_TITLE_ART.get(normalizedTitleId);
-  if (knownArt) {
-    artCache.set(cacheKey, knownArt);
-    return knownArt;
-  }
+  artCache.set(cacheKey, knownArt ?? null);
+  return knownArt ?? null;
+}
 
-  if (!normalizedTitleName) {
-    artCache.set(cacheKey, null);
-    return null;
-  }
+async function lookupMicrosoftStoreByTitleId(titleId, fetchImpl) {
+  const url = new URL(STORE_LOOKUP_URL);
+  url.searchParams.set("market", "US");
+  url.searchParams.set("languages", "en-US");
+  url.searchParams.set("value", titleId);
+  url.searchParams.set("alternateId", "XboxTitleId");
+  url.searchParams.set("fieldsTemplate", "browse");
 
-  const storeArt = await searchMicrosoftStore(normalizedTitleName, fetchImpl);
-  artCache.set(cacheKey, storeArt);
-  return storeArt;
+  const response = await fetchMicrosoftStore(url, fetchImpl);
+  const product = response.Products?.[0] ?? null;
+  return product ? getArtFromProduct(product, "microsoft-store-title-id") : null;
 }
 
 async function searchMicrosoftStore(titleName, fetchImpl) {
@@ -47,6 +68,17 @@ async function searchMicrosoftStore(titleName, fetchImpl) {
   url.searchParams.set("query", titleName);
   url.searchParams.set("topProducts", "5");
 
+  const data = await fetchMicrosoftStore(url, fetchImpl);
+  const products = (data.Results ?? []).flatMap((result) => result.Products ?? []);
+  const product = selectBestProduct(products, titleName);
+  if (!product) {
+    return null;
+  }
+
+  return getArtFromAutosuggestProduct(product, titleName);
+}
+
+async function fetchMicrosoftStore(url, fetchImpl) {
   const response = await fetchImpl(url, {
     headers: {
       "Accept": "application/json",
@@ -55,12 +87,32 @@ async function searchMicrosoftStore(titleName, fetchImpl) {
   });
 
   if (!response.ok) {
-    throw new Error(`Microsoft Store search failed: ${response.status}`);
+    throw new Error(`Microsoft Store request failed: ${response.status}`);
   }
 
-  const data = await response.json();
-  const products = (data.Results ?? []).flatMap((result) => result.Products ?? []);
-  const product = selectBestProduct(products, titleName);
+  return response.json();
+}
+
+function getArtFromProduct(product, source) {
+  const localized = product.LocalizedProperties?.[0];
+  const images = localized?.Images ?? [];
+  const icon = selectImage(images, ["Logo", "BoxArt"]);
+  const hero = selectImage(images, ["TitledHeroArt", "SuperHeroArt", "Screenshot", "BoxArt"]);
+
+  if (!icon?.Uri && !hero?.Uri) {
+    return null;
+  }
+
+  return {
+    titleName: localized?.ProductTitle ?? "",
+    productId: product.ProductId ?? "",
+    imageUrl: normalizeImageUrl(icon?.Uri || hero?.Uri),
+    heroUrl: normalizeImageUrl(hero?.Uri || icon?.Uri),
+    source,
+  };
+}
+
+function getArtFromAutosuggestProduct(product, titleName) {
   if (!product?.Icon) {
     return null;
   }
@@ -69,8 +121,15 @@ async function searchMicrosoftStore(titleName, fetchImpl) {
     titleName: product.Title ?? titleName,
     productId: product.ProductId ?? "",
     imageUrl: normalizeImageUrl(product.Icon),
-    source: "microsoft-store",
+    heroUrl: "",
+    source: "microsoft-store-search",
   };
+}
+
+function selectImage(images, purposes) {
+  return purposes
+    .map((purpose) => images.find((image) => image.ImagePurpose === purpose))
+    .find(Boolean) ?? null;
 }
 
 function selectBestProduct(products, titleName) {
