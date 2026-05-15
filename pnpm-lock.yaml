@@ -11,6 +11,12 @@ importers:
       '@upstash/redis':
         specifier: ^1.38.0
         version: 1.38.0
+      react:
+        specifier: ^19.2.6
+        version: 19.2.6
+      react-dom:
+        specifier: ^19.2.6
+        version: 19.2.6(react@19.2.6)
       redis:
         specifier: ^4.7.1
         version: 4.7.1
@@ -1316,6 +1322,15 @@ packages:
     resolution: {integrity: sha512-9WmIKF6mkvA0SLmA2Knm9+qj89e+j1zqgyn8aXGd7+nAduPoqgI9lO57SAZNn/Byzo5P7JhXTyg9PzaJbH73bA==}
     engines: {node: '>= 0.8'}
 
+  react-dom@19.2.6:
+    resolution: {integrity: sha512-0prMI+hvBbPjsWnxDLxlCGyM8PN6UuWjEUCYmZhO67xIV9Xasa/r/vDnq+Xyq4Lo27g8QSbO5YzARu0D1Sps3g==}
+    peerDependencies:
+      react: ^19.2.6
+
+  react@19.2.6:
+    resolution: {integrity: sha512-sfWGGfavi0xr8Pg0sVsyHMAOziVYKgPLNrS7ig+ivMNb3wbCBw3KxtflsGBAwD3gYQlE/AEZsTLgToRrSCjb0Q==}
+    engines: {node: '>=0.10.0'}
+
   readdirp@4.1.2:
     resolution: {integrity: sha512-GDhwkLfywWL2s6vEjyhri+eXmfH6j1L7JE27WhqLeYzoh/A3DBaYGEj2H/HFZCn/kMfim73FXxEJTw06WtxQwg==}
     engines: {node: '>= 14.18.0'}
@@ -1360,6 +1375,9 @@ packages:
   sandbox@2.5.6:
     resolution: {integrity: sha512-tnFr7nyiuEhsAGb+xy60SDbij0790X+FgDljh3J/2HaRM6yQgNJkQKHbDH8ld7mR+PozXGgEfJ2Dc/5OyFnwsg==}
     hasBin: true
+
+  scheduler@0.27.0:
+    resolution: {integrity: sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q==}
 
   semver@6.3.1:
     resolution: {integrity: sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA==}
@@ -2882,6 +2900,13 @@ snapshots:
       iconv-lite: 0.4.24
       unpipe: 1.0.0
 
+  react-dom@19.2.6(react@19.2.6):
+    dependencies:
+      react: 19.2.6
+      scheduler: 0.27.0
+
+  react@19.2.6: {}
+
   readdirp@4.1.2: {}
 
   redis@4.7.1:
@@ -2942,6 +2967,8 @@ snapshots:
       - bare-abort-controller
       - react-native-b4a
       - supports-color
+
+  scheduler@0.27.0: {}
 
   semver@6.3.1: {}
 
