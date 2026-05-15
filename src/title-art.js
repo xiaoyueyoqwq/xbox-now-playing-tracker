@@ -1,16 +1,6 @@
 const STORE_AUTOSUGGEST_URL = "https://displaycatalog.mp.microsoft.com/v7.0/productFamilies/autosuggest";
 const STORE_LOOKUP_URL = "https://displaycatalog.mp.microsoft.com/v7.0/products/lookup";
 
-const KNOWN_TITLE_ART = new Map([
-  ["1794566092", {
-    titleName: "Minecraft Launcher",
-    imageUrl: "https://store-images.s-microsoft.com/image/apps.1815.14247769038588514.a7fa20d7-bc1c-464b-bf78-16dfcd742fe5.20b70e8c-ab2e-45b9-b8c3-2390ebb38f59",
-    heroUrl: "https://store-images.s-microsoft.com/image/apps.42446.14247769038588514.a7fa20d7-bc1c-464b-bf78-16dfcd742fe5.1aa80fc8-cf92-43f6-9efb-17fa817cf339",
-    productId: "9PGW18NPBZV5",
-    source: "known",
-  }],
-]);
-
 const artCache = new Map();
 
 export async function getTitleArt({ titleId, titleName, fetchImpl = fetch }) {
@@ -42,9 +32,8 @@ export async function getTitleArt({ titleId, titleName, fetchImpl = fetch }) {
     }
   }
 
-  const knownArt = KNOWN_TITLE_ART.get(normalizedTitleId);
-  artCache.set(cacheKey, knownArt ?? null);
-  return knownArt ?? null;
+  artCache.set(cacheKey, null);
+  return null;
 }
 
 async function lookupMicrosoftStoreByTitleId(titleId, fetchImpl) {
