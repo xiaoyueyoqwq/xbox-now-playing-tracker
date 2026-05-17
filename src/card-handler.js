@@ -13,6 +13,7 @@ import {
 import { logInfo, logWarn } from "./logger.js";
 import { OpenXblProvider } from "./openxbl.js";
 import { renderCard } from "./renderer.js";
+import { shouldContinuePlaySession } from "./session-state.js";
 import { getTitleArt } from "./title-art.js";
 
 const config = getConfig();
@@ -35,8 +36,9 @@ const IMAGE_FETCH_TIMEOUT_MS = 5000;
 const IMAGE_DATA_MAX_BYTES = 600_000;
 const IMAGE_FETCH_ATTEMPTS = 3;
 const PLAY_SESSION_RESPONSE_TTL_SECONDS = 15;
+const PLAY_SESSION_OBSERVATION_GRACE_MS = 30 * 60 * 1000;
 const PLAY_SESSION_RESET_GRACE_MS = Math.max(
-  5 * 60 * 1000,
+  PLAY_SESSION_OBSERVATION_GRACE_MS,
   (config.cacheTtlSeconds + 30) * 1000,
 );
 
@@ -588,7 +590,9 @@ async function attachPresenceHistory(presence) {
     await markCurrentGameSessionAway(currentGameSessionKey, now, sessionKey);
 
     const existingSession = normalizePlaySession(await cache.getValue(sessionKey));
-    const sessionStartedAt = shouldContinuePlaySession(existingSession, now)
+    const sessionStartedAt = shouldContinuePlaySession(existingSession, now, {
+      graceMs: PLAY_SESSION_RESET_GRACE_MS,
+    })
       ? existingSession.startedAt
       : now;
     await cache.setValue(
@@ -729,24 +733,6 @@ function normalizeCurrentGameSession(value) {
     titleName: String(value.titleName || ""),
     awayObservedAt: parseOptionalSessionTimestamp(value.awayObservedAt),
   };
-}
-
-function shouldContinuePlaySession(session, now) {
-  if (!session) {
-    return false;
-  }
-
-  if (!session.awayObservedAt) {
-    return true;
-  }
-
-  const awayObservedAtMs = Date.parse(session.awayObservedAt);
-  const nowMs = Date.parse(now);
-  if (Number.isNaN(awayObservedAtMs) || Number.isNaN(nowMs)) {
-    return false;
-  }
-
-  return nowMs - awayObservedAtMs <= PLAY_SESSION_RESET_GRACE_MS;
 }
 
 function parseSessionTimestamp(value) {

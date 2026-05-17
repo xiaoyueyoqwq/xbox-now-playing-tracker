@@ -116,6 +116,8 @@ Image data URIs are cached for 12 hours. Presence freshness is controlled by `CA
 
 Redis is strongly recommended in production. Without Redis, Vercel instance changes can lose session and last-seen state.
 
+Play sessions are request-driven. Vercel Serverless does not run a persistent timer; the app stores the first observed game timestamp in Redis and recomputes the elapsed minutes whenever the card endpoint is requested. A same-game session continues across short GitHub image proxy or crawler gaps, but a gap longer than 30 minutes starts a new session to avoid reviving stale play time.
+
 ## Local Development
 
 ```bash
