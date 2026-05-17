@@ -161,6 +161,52 @@ export async function handleCardRequest(request, response) {
   }
 }
 
+export async function refreshAllowedGamertags({ force = true } = {}) {
+  const gamertags = getConfiguredGamertags();
+  const results = [];
+
+  for (const gamertag of gamertags) {
+    const cacheKey = `openxbl:${gamertag.toLowerCase()}`;
+    const startedAt = Date.now();
+    try {
+      const cached = force
+        ? { status: "miss", value: null }
+        : await cache.get(cacheKey);
+      const presence = cached.status === "fresh"
+        ? await ensureRenderablePresence(cached.value)
+        : await cache.refresh(cacheKey, () => loadPresence(gamertag, false));
+
+      logCardResult(force ? "cron=refresh" : `cron=${cached.status}`, presence);
+      results.push({
+        gamertag,
+        ok: true,
+        cache: cached.status,
+        online: Boolean(presence.isOnline),
+        activityKind: presence.activityKind || "unknown",
+        titleName: presence.titleName || "",
+        elapsedMs: Date.now() - startedAt,
+      });
+    } catch (error) {
+      logWarn(
+        `[cron] refresh failed gt=${gamertag}: ${formatError(error)}`,
+      );
+      results.push({
+        gamertag,
+        ok: false,
+        error: formatError(error),
+        elapsedMs: Date.now() - startedAt,
+      });
+    }
+  }
+
+  return {
+    ok: results.length > 0 && results.every((result) => result.ok),
+    refreshedAt: new Date().toISOString(),
+    count: results.length,
+    results,
+  };
+}
+
 async function loadPresence(gamertag, useMock) {
   if (useMock) {
     return applyArtworkPolicy({
@@ -275,14 +321,25 @@ function isAllowedGamertag(gamertag) {
 
 function getAllowedGamertags() {
   return new Set(
-    [
-      config.defaultGamertag,
-      ...config.allowedGamertags,
-    ]
-      .map(normalizeGamertag)
-      .filter(Boolean)
-      .map((value) => value.toLowerCase()),
+    getConfiguredGamertags().map((value) => value.toLowerCase()),
   );
+}
+
+function getConfiguredGamertags() {
+  const seen = new Set();
+  const gamertags = [];
+  for (const value of [config.defaultGamertag, ...config.allowedGamertags]) {
+    const gamertag = normalizeGamertag(value);
+    const key = gamertag.toLowerCase();
+    if (!gamertag || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    gamertags.push(gamertag);
+  }
+
+  return gamertags;
 }
 
 function shouldWarnForTitleArtFailure(classification) {

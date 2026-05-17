@@ -17,6 +17,7 @@ export function getConfig(env = process.env) {
     noImageCache: isEnabled(env.NO_IMAGE_CACHE),
     defaultGamertag: env.DEFAULT_GAMERTAG ?? "",
     allowedGamertags: parseList(env.ALLOWED_GAMERTAGS),
+    cronSecret: env.CRON_SECRET ?? "",
   };
 }
 

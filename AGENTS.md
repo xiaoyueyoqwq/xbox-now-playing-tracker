@@ -14,7 +14,9 @@
 - Prefer stale-but-recent presence over rate-limit failures. A 2-5 minute freshness window is acceptable for a profile card.
 - Do not expose Xbox API keys, user tokens, XUIDs tied to private accounts, or service credentials in client-side code or public examples.
 - Live non-mock card requests must be restricted to configured gamertags before cache/provider lookup. Unknown gamertags should return `403 text/plain` with self-hosting guidance, not a normal SVG card, so public deployments do not become OpenXBL proxies.
+- Scheduled refresh endpoints must require `CRON_SECRET` and refresh only configured gamertags. They should return JSON, not SVG, and should never accept arbitrary gamertag input.
 - Redis is not only response cache: it also stores last-seen game, session timers, and image data. If TCP Redis disconnects, rebuild the Redis client and retry once before falling back to memory; otherwise offline cards can lose last-seen artwork.
+- Provider/cache failure policy is conservative: do not delete session or last-seen Redis values on refresh failure. Keep stale state visible when available and report per-gamertag failures in JSON/logs.
 
 ## API Notes
 - OpenXBL (`https://xbl.io`) is the current default candidate because it offers simple API-key access to Xbox Live endpoints and documented presence/title routes.
@@ -42,6 +44,7 @@
 - Surface provider failures as a valid card state, not as a broken image response.
 - Keep presence/provider cache TTL separate from SVG response TTL. Session text is static SVG output, so active game cards need a short HTTP `max-age` while still using the backend presence cache to avoid extra OpenXBL calls.
 - In Vercel/Serverless paths, do not depend on background work after `response.end()` for correctness-critical presence state. Stale presence must be refreshed before responding, and old stale SVG should be served only when that refresh fails.
+- Optional proactive refresh should be implemented as external scheduled HTTP calls, for example Cloudflare Worker Cron Trigger -> `/api/cron/refresh`, not as an in-process background loop.
 - Remote image embedding uses two cache layers: `image-data:<hash(candidateUrl)>` stores data URIs, while `image-candidate:<hash(sourceUrl,purpose,size)>` stores the last successful resized URL for 12 hours so known-bad 4xx resize variants are not retried first.
 - SVG card typography must not depend on Vercel or GitHub viewer system fonts. Keep card fonts in `fonts/` and render visible card text as SVG paths when stable visual layout matters, because SVGs embedded through `<img>` can apply fonts differently from standalone SVG documents.
 

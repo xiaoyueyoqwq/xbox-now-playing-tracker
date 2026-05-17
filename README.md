@@ -21,10 +21,13 @@ GET /
 GET /api/card?gamertag=YourGamertag
 GET /api/card?gamertag=YourGamertag&refresh=1
 GET /api/card?gamertag=YourGamertag&mock=1
+GET /api/cron/refresh
 GET /api/health
 ```
 
 `refresh=1` bypasses the presence cache for that request. Session and last-seen state still use Redis so timer and offline behavior remain continuous.
+
+`/api/cron/refresh` is a protected JSON endpoint for scheduled refresh jobs. It requires `Authorization: Bearer <CRON_SECRET>` and refreshes only `DEFAULT_GAMERTAG` plus `ALLOWED_GAMERTAGS`.
 
 ## Vercel Deployment
 
@@ -52,6 +55,7 @@ NO_CACHE=0
 NO_IMAGE_CACHE=0
 DEFAULT_GAMERTAG=YourGamertag
 ALLOWED_GAMERTAGS=YourGamertag
+CRON_SECRET=generate-a-long-random-secret
 ```
 
 7. Deploy, then test:
@@ -100,6 +104,7 @@ You can change it to another non-blocked region if latency is better for your au
 | `NO_IMAGE_CACHE` | No | `1` bypasses Store/avatar data URI cache for debugging. |
 | `DEFAULT_GAMERTAG` | No | Used when `?gamertag=` is omitted. |
 | `ALLOWED_GAMERTAGS` | Recommended | Comma-separated gamertag allowlist for live OpenXBL requests. `DEFAULT_GAMERTAG` is also allowed automatically. |
+| `CRON_SECRET` | Optional | Required only for `/api/cron/refresh`. Use a long random value and send it as a Bearer token. |
 | `PORT` | Local only | Local preview port. Default is `3000`. |
 
 ## Cache Strategy
@@ -118,6 +123,54 @@ Redis is strongly recommended in production. Without Redis, Vercel instance chan
 
 Play sessions are request-driven. Vercel Serverless does not run a persistent timer; the app stores the first observed game timestamp in Redis and recomputes the elapsed minutes whenever the card endpoint is requested. A same-game session continues across short GitHub image proxy or crawler gaps, but a gap longer than 30 minutes starts a new session to avoid reviving stale play time.
 
+Refresh failures are conservative. If OpenXBL, Microsoft Store, Redis, or the scheduled refresh path fails, the app does not delete existing session or last-seen data. The card serves stale cached state when available, and the cron endpoint reports per-gamertag failures in JSON so the next successful refresh can repair state.
+
+## Optional Cloudflare Scheduled Refresh
+
+GitHub image proxy requests are not guaranteed to arrive on a schedule. For a steadier 15-30 minute observation window without Vercel Pro, use a Cloudflare Worker Cron Trigger to call the protected refresh endpoint.
+
+Worker example:
+
+```js
+export default {
+  async scheduled(_event, env, ctx) {
+    ctx.waitUntil(refresh(env));
+  },
+};
+
+async function refresh(env) {
+  const response = await fetch(env.REFRESH_URL, {
+    headers: {
+      Authorization: `Bearer ${env.CRON_SECRET}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`refresh failed: ${response.status}`);
+  }
+}
+```
+
+`wrangler.toml`:
+
+```toml
+name = "xbox-now-playing-refresh"
+main = "src/index.js"
+compatibility_date = "2026-05-18"
+
+[triggers]
+crons = ["*/15 * * * *"]
+```
+
+Set Worker variables:
+
+```text
+REFRESH_URL=https://your-project.vercel.app/api/cron/refresh
+CRON_SECRET=the-same-value-as-vercel-cron-secret
+```
+
+At 15-minute intervals this costs about 4 refreshes per hour per configured deployment, before OpenXBL provider retries. Keep `ALLOWED_GAMERTAGS` small on the free OpenXBL plan.
+
 ## Local Development
 
 ```bash
@@ -132,6 +185,7 @@ Useful URLs:
 http://localhost:3000/api/card?gamertag=YourGamertag&mock=1
 http://localhost:3000/api/card?gamertag=YourGamertag
 http://localhost:3000/api/card?gamertag=YourGamertag&refresh=1
+http://localhost:3000/api/cron/refresh
 http://localhost:3000/api/health
 http://localhost:3000/
 ```
@@ -173,6 +227,7 @@ OpenXBL free-tier limits are low enough that per-view provider calls are not acc
 - The endpoint renders from Redis when possible.
 - OpenXBL refreshes are coalesced per player.
 - Provider failures produce a valid SVG instead of a broken image.
+- Scheduled refresh calls the same cache and session pipeline as live card refreshes.
 
 Live OpenXBL requests are restricted to configured gamertags. If a request uses a gamertag that is not in `DEFAULT_GAMERTAG` or `ALLOWED_GAMERTAGS`, the endpoint returns `403 text/plain` with a self-hosting message instead of calling OpenXBL. `mock=1` remains public so the generator page can preview cards without spending API quota.
 

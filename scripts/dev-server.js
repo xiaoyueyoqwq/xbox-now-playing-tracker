@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { handleCardRequest, shutdownCardHandler } from "../src/card-handler.js";
 import { getConfig } from "../src/config.js";
+import { handleCronRefreshRequest } from "../src/cron-handler.js";
 import { logError, logInfo, logWarn } from "../src/logger.js";
 
 const config = getConfig();
@@ -22,6 +23,12 @@ const server = http.createServer(async (request, response) => {
 
     if (url.pathname === "/api/card") {
       await handleCardRequest(request, response);
+      logResponse(request, response, startedAt);
+      return;
+    }
+
+    if (url.pathname === "/api/cron/refresh") {
+      await handleCronRefreshRequest(request, response);
       logResponse(request, response, startedAt);
       return;
     }
