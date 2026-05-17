@@ -13,8 +13,14 @@ export function getConfig(env = process.env) {
     redisRestToken: env.UPSTASH_REDIS_REST_TOKEN ?? env.KV_REST_API_TOKEN ?? "",
     cacheTtlSeconds: Number.parseInt(env.CACHE_TTL_SECONDS ?? "300", 10),
     staleTtlSeconds: Number.parseInt(env.STALE_TTL_SECONDS ?? "86400", 10),
+    noCache: isEnabled(env.NO_CACHE),
+    noImageCache: isEnabled(env.NO_IMAGE_CACHE),
     defaultGamertag: env.DEFAULT_GAMERTAG ?? "",
   };
+}
+
+function isEnabled(value) {
+  return ["1", "true", "yes", "on"].includes(String(value ?? "").toLowerCase());
 }
 
 function loadDotEnv(path = ".env") {

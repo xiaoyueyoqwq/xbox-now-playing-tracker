@@ -1,4 +1,7 @@
 {
+  "regions": [
+    "iad1"
+  ],
   "headers": [
     {
       "source": "/api/card",
@@ -13,7 +16,11 @@
   "rewrites": [
     {
       "source": "/favicon.ico",
-      "destination": "/img/favicon.svg"
+      "destination": "/img/favicon.ico"
+    },
+    {
+      "source": "/img/:path*",
+      "destination": "/img/:path*"
     }
   ]
 }

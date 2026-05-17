@@ -1,7 +1,7 @@
 {
   "name": "xbox-now-playing-tracker",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "packageManager": "pnpm@11.1.2",
   "description": "Embeddable Xbox now-playing SVG card for GitHub profiles.",
   "type": "module",

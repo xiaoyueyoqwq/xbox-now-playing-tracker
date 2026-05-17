@@ -1,186 +1,196 @@
 # Xbox Now Playing Tracker
 
-An embeddable Xbox "now playing" card for GitHub profiles and other Markdown surfaces. The goal is the Xbox equivalent of Spotify profile widgets: a small image endpoint that shows a player's current Xbox presence and the game they are playing.
+An embeddable Xbox presence card for GitHub profiles and other Markdown surfaces.
 
 ```md
-![Xbox Now Playing](https://your-deployment.example/api/card?gamertag=MajorNelson)
+![Xbox Now Playing](https://your-project.vercel.app/api/card?gamertag=YourGamertag)
 ```
 
-## Goal
+The endpoint returns an SVG image. It is designed for public, unauthenticated image requests, while provider calls and API keys stay server-side.
 
-- Generate a cacheable SVG card for a gamertag or XUID.
-- Show current Xbox presence: online/offline state, current title, and recent status text when available.
-- Work well inside GitHub profile README files, where the image may be requested many times by browsers and GitHub's image proxy.
-- Avoid spending Xbox API quota on every image request.
+## Features
 
-## API Research
+- Current Xbox presence from OpenXBL.
+- Game/app/system classification: `game`, `app`, `system`, `unknown`.
+- Microsoft Store artwork lookup for game icons and hero images.
+- Play session timer for confirmed games.
+- Last-seen game state when the player goes offline.
+- Xbox profile avatar fallback for non-game states without title artwork.
+- Redis-backed cache for Vercel Serverless.
+- Local mock mode for UI testing without an API key.
 
-The first API candidate is OpenXBL (`https://xbl.io`). Its advantages are practical for this project:
-
-- Simple API-key model.
-- Xbox Live profile, title, and presence style endpoints.
-- Easier to deploy for a public widget than handling raw Microsoft/Xbox authentication flows.
-
-The main concern is rate limiting. OpenXBL's getting-started page states that free access starts with `150 requests/hour`, with options to increase that limit. That is not enough for direct per-view fetching, but it is enough for a cached profile card.
-
-Recommended request model:
-
-- Card image requests read from cache.
-- A background refresh or request-triggered refresh calls OpenXBL at most once every 2-5 minutes per tracked player.
-- Failed refreshes keep serving the last successful card with a stale timestamp.
-
-With a 2-minute provider cache, one player costs at most 30 provider requests/hour. With a 5-minute cache, one player costs at most 12 provider requests/hour.
-
-## Are There Less Restricted APIs?
-
-There is no clearly better public API for this exact use case.
-
-- **Microsoft official Xbox services APIs**: best long-term stability, but generally intended for registered Xbox title developers and partner/title scenarios. They are not a simple public profile-widget API.
-- **Open-source Xbox Live wrappers**: can access Xbox Live data through Microsoft account authentication, but they shift complexity into token management and may be more fragile for a hosted public card.
-- **Other third-party Xbox APIs**: may exist, but tend to have similar rate limits, unclear maintenance status, or paid plans. They should be evaluated only if OpenXBL's paid tiers or caching model do not fit.
-
-For the initial implementation, OpenXBL plus aggressive caching is the most realistic path.
-
-## Planned Architecture
+## API Shape
 
 ```text
-GitHub README / Browser
-        |
-        v
-GET /api/card?gamertag=...
-        |
-        v
-Vercel Serverless Function
-        |
-        +--> cache hit: render SVG from cached presence
-        |
-        +--> cache miss/stale: refresh provider data, store result, render SVG
+GET /api/card?gamertag=YourGamertag
+GET /api/card?gamertag=YourGamertag&refresh=1
+GET /api/card?gamertag=YourGamertag&mock=1
+GET /api/health
 ```
 
-Core modules:
+`refresh=1` bypasses the presence cache for that request. Session and last-seen state still use Redis so timer and offline behavior remain continuous.
 
-- `provider`: OpenXBL integration hidden behind a small interface.
-- `cache`: Redis-backed cache for serverless persistence, with memory fallback for local development.
-- `title-art`: game artwork lookup through known title mappings and Microsoft Store catalog search.
-- `renderer`: SVG rendering with deterministic layout and safe escaping.
-- `api`: Vercel Serverless Function endpoints.
+## Vercel Deployment
 
-## Configuration
+1. Fork or clone this repository.
 
-Copy `.env.example` to `.env` and fill in the OpenXBL key:
+2. Create an OpenXBL API key at `https://xbl.io`.
+
+3. Create a Redis database. Upstash Redis REST is recommended for Vercel Serverless because it avoids long-lived TCP connection issues.
+
+4. Import the repository into Vercel.
+
+5. Set the project framework to `Other` if Vercel asks. No build command is required.
+
+6. Add environment variables in Vercel:
 
 ```env
 OPENXBL_API_KEY=replace-me
 OPENXBL_CONTRACT=
 OPENXBL_BASE_URL=https://xbl.io/api/v2
-REDIS_URL=
-UPSTASH_REDIS_REST_URL=
-UPSTASH_REDIS_REST_TOKEN=
+UPSTASH_REDIS_REST_URL=https://your-upstash-url
+UPSTASH_REDIS_REST_TOKEN=your-upstash-token
 CACHE_TTL_SECONDS=300
 STALE_TTL_SECONDS=86400
-DEFAULT_GAMERTAG=replace-me
-PORT=3000
+NO_CACHE=0
+NO_IMAGE_CACHE=0
+DEFAULT_GAMERTAG=YourGamertag
 ```
+
+7. Deploy, then test:
+
+```text
+https://your-project.vercel.app/api/health
+https://your-project.vercel.app/api/card?gamertag=YourGamertag
+```
+
+8. Use the card in Markdown:
+
+```md
+![Xbox Now Playing](https://your-project.vercel.app/api/card?gamertag=YourGamertag)
+```
+
+## Vercel Region Warning
+
+Do not deploy the Serverless Function to `hkg1` or `sin1`.
+
+OpenXBL/API traffic from those regions has been observed returning `403` responses. Prefer a US or other non-blocked region. If you pin regions in Vercel, avoid Hong Kong and Singapore.
+
+This repository sets Vercel's default region to `iad1` in `vercel.json`:
+
+```json
+{
+  "regions": ["iad1"]
+}
+```
+
+You can change it to another non-blocked region if latency is better for your audience, but keep `hkg1` and `sin1` out of the list.
+
+## Environment Variables
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `OPENXBL_API_KEY` | Yes | Server-side OpenXBL API key. Never expose this in Markdown or client code. |
+| `OPENXBL_CONTRACT` | No | Set if your OpenXBL key requires a contract value, for example `100`. |
+| `OPENXBL_BASE_URL` | No | Defaults to `https://xbl.io/api/v2`. |
+| `UPSTASH_REDIS_REST_URL` | Production | Recommended Redis URL for Vercel. |
+| `UPSTASH_REDIS_REST_TOKEN` | Production | Recommended Redis token for Vercel. |
+| `REDIS_URL` | Optional | Supports `redis://`, `rediss://`, or REST-style `https://:token@host`. REST variables are preferred on Vercel. |
+| `CACHE_TTL_SECONDS` | No | Fresh presence cache TTL. Default is `300`. |
+| `STALE_TTL_SECONDS` | No | Stale presence retention TTL. Default is `86400`. |
+| `NO_CACHE` | No | `1` bypasses presence cache reads for debugging. |
+| `NO_IMAGE_CACHE` | No | `1` bypasses Store/avatar data URI cache for debugging. |
+| `DEFAULT_GAMERTAG` | No | Used when `?gamertag=` is omitted. |
+| `PORT` | Local only | Local preview port. Default is `3000`. |
+
+## Cache Strategy
+
+The project uses Redis for more than response caching:
+
+- Presence cache.
+- Play session start time.
+- Last-seen game and artwork.
+- Microsoft Store image data URIs.
+- Xbox avatar image data URIs.
+
+Image data URIs are cached for 12 hours. Presence freshness is controlled by `CACHE_TTL_SECONDS`. Active game SVG responses use a shorter HTTP cache window so the minute-based session display updates without increasing OpenXBL calls.
+
+Redis is strongly recommended in production. Without Redis, Vercel instance changes can lose session and last-seen state.
 
 ## Local Development
 
 ```bash
 pnpm install
+cp .env.example .env
 pnpm dev
 ```
 
-Open these URLs:
+Useful URLs:
 
-- Mock card, no API key required: `http://localhost:3000/api/card?gamertag=YourTag&mock=1`
-- Real OpenXBL card: `http://localhost:3000/api/card?gamertag=YourTag`
-- Health check: `http://localhost:3000/api/health`
+```text
+http://localhost:3000/api/card?gamertag=YourGamertag&mock=1
+http://localhost:3000/api/card?gamertag=YourGamertag
+http://localhost:3000/api/card?gamertag=YourGamertag&refresh=1
+http://localhost:3000/api/health
+```
 
-`pnpm dev` starts the local preview server with Node watch mode. Use this for normal local development.
-
-If you need Vercel CLI behavior specifically, use:
+Commands:
 
 ```bash
-pnpm vercel:dev
+pnpm dev        # local preview with node --watch
+pnpm preview    # local preview without watch mode
+pnpm vercel:dev # Vercel CLI development server
 ```
 
-If you only want to test the function logic without watch mode, use:
+## Activity Classification
 
-```bash
-pnpm preview
+Xbox presence records do not provide a reliable `isGame` field. The app classifies activity as:
+
+- `game`
+- `app`
+- `system`
+- `unknown`
+
+Classification uses local known app/system lists, Microsoft Store game metadata, and conservative fallbacks. Only confirmed `game` activity writes play session and last-seen game history.
+
+## Artwork
+
+Game artwork comes from Microsoft Store metadata:
+
+- Hero art prefers `SuperHeroArt`.
+- Cover art prefers high-resolution square images such as `BoxArt`, `FeaturePromotionalSquareArt`, or `Tile`.
+- Very small `Logo` assets are avoided when better candidates exist.
+- Store resize failures fall back to the original image URL.
+- Non-game states without title artwork use the player's Xbox avatar.
+
+## Rate Limits
+
+OpenXBL free-tier limits are low enough that per-view provider calls are not acceptable. This project is built around cache-first rendering:
+
+- Browsers and GitHub request the SVG endpoint.
+- The endpoint renders from Redis when possible.
+- OpenXBL refreshes are coalesced per player.
+- Provider failures produce a valid SVG instead of a broken image.
+
+## Security
+
+- Keep `OPENXBL_API_KEY` server-side.
+- Do not commit `.env` or Vercel environment files.
+- Do not expose Redis tokens publicly.
+- The public card endpoint should not require a user token.
+
+## Project Structure
+
+```text
+api/                 Vercel Serverless endpoints
+img/                 Local static assets
+scripts/dev-server.js Local preview server
+src/cache.js         Redis and memory cache
+src/card-handler.js  Request handling and data enrichment
+src/openxbl.js       OpenXBL provider
+src/renderer.js      SVG renderer
+src/title-art.js     Microsoft Store artwork lookup
 ```
-
-## What You Need To Do In OpenXBL
-
-1. Sign in or create an account at `https://xbl.io`.
-2. Open the account/API area and create or copy an API key.
-3. Put that key in `.env` as `OPENXBL_API_KEY`.
-4. Use a real gamertag in `DEFAULT_GAMERTAG` or pass `?gamertag=...` in the card URL.
-
-Keep the API key server-side. Do not put it in GitHub profile Markdown or frontend JavaScript.
-
-If you use an OpenXBL app/consumer key instead of a personal API key, set:
-
-```env
-OPENXBL_CONTRACT=100
-```
-
-The default OpenXBL base URL is `https://xbl.io/api/v2`. It can be overridden with `OPENXBL_BASE_URL` if OpenXBL changes routing or asks you to use a different host.
-
-## Redis Cache
-
-Production should use Redis so Vercel function instance changes do not drop cache data. Configure one of these sets:
-
-```env
-REDIS_URL=redis://default:password@host:port
-```
-
-or:
-
-```env
-REDIS_URL=https://:token@host
-```
-
-or the explicit Upstash REST variables:
-
-```env
-UPSTASH_REDIS_REST_URL=https://host
-UPSTASH_REDIS_REST_TOKEN=token
-```
-
-The Redis value is kept for `STALE_TTL_SECONDS`. Within `CACHE_TTL_SECONDS`, the card is served as fresh. After that, stale data can still be used while the provider is refreshed.
-
-## Rate-Limit Strategy
-
-The project should treat provider requests as scarce:
-
-- Never fetch OpenXBL directly from frontend code.
-- Cache by normalized player identifier.
-- Coalesce simultaneous refreshes for the same player.
-- Prefer `stale-while-revalidate` behavior when the provider is unavailable.
-- Return valid SVG even when provider data is missing or stale.
-
-Local development falls back to memory cache when Redis is not configured. Production should set Redis environment variables.
-
-## Game Artwork
-
-The card can render a game icon when artwork is available:
-
-- Xbox title IDs are resolved through Microsoft Store catalog lookup first.
-- Unknown or unmapped titles use Microsoft Store catalog autosuggest by title name.
-- If artwork lookup fails, the renderer falls back to the Xbox glyph.
-
-This keeps the OpenXBL presence integration separate from store artwork lookup and avoids depending on one unofficial endpoint for every field.
-
-## First Milestone
-
-- Create a minimal HTTP service. Done.
-- Convert the service to Vercel Serverless Functions. Done.
-- Add one SVG endpoint: `/api/card?gamertag=...`. Done.
-- Add a mock mode for local SVG testing: `/api/card?gamertag=...&mock=1`. Done.
-- Integrate OpenXBL presence lookup. Done locally with live API response.
-- Add game artwork lookup and SVG image rendering. Done.
-- Add cache with configurable TTL. Done.
-- Document deployment and environment setup. Done.
 
 ## References
 

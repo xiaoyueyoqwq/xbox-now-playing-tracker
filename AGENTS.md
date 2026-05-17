@@ -13,12 +13,23 @@
 - Do not call Xbox APIs once per image view. Always serve from application cache or edge cache when possible.
 - Prefer stale-but-recent presence over rate-limit failures. A 2-5 minute freshness window is acceptable for a profile card.
 - Do not expose Xbox API keys, user tokens, XUIDs tied to private accounts, or service credentials in client-side code or public examples.
+- Redis is not only response cache: it also stores last-seen game, session timers, and image data. If TCP Redis disconnects, rebuild the Redis client and retry once before falling back to memory; otherwise offline cards can lose last-seen artwork.
 
 ## API Notes
 - OpenXBL (`https://xbl.io`) is the current default candidate because it offers simple API-key access to Xbox Live endpoints and documented presence/title routes.
 - OpenXBL free-tier rate limits are low enough that backend caching is mandatory. Treat `150 requests/hour` as the planning budget unless a paid plan or different provider is selected.
 - Microsoft official Xbox services APIs are aimed at registered Xbox title developers and partner scenarios, not general public GitHub profile widgets.
 - Unofficial Xbox Live API wrappers can reduce vendor dependency but usually require Microsoft/Xbox authentication handling and may be more fragile than OpenXBL.
+- Treat missing XUID from OpenXBL gamertag search as provider jitter before failing. Retry at least 3 times for empty search results; retry transient request failures such as 408, 429, and 5xx, but do not retry obvious auth/config failures such as 401/403.
+
+## Activity Classification
+- Presence title records do not expose a reliable `isGame` flag. Classify activity through `src/activity-classifier.js` as `game`, `app`, `system`, or `unknown`; do not collapse this into a binary game/other check.
+- Classification priority is: online with no title -> `system`; known system title denylist -> `system`; known app title denylist -> `app`; Microsoft Store game metadata (`ProductFamilyName` containing `Games`, `ProductKind` as `Game`, or a Games autosuggest/product lookup source) -> `game`; known game allowlist -> `game`; otherwise -> `unknown`.
+- Known system titles currently include Home/Dashboard/Settings/Store/My Games & Apps/Guide. Known app titles include Xbox App, Spotify, YouTube, Netflix, Edge, Twitch, Discord, Disney+, Hulu, Prime Video, Apple TV, and Media Player.
+- `Xbox App` is a special app override: use local Xbox brand artwork instead of Microsoft Store artwork because Store-derived art can be misleading for this title.
+- Only confirmed `game` activity should write play-session and last-seen game history. `app`, `system`, and `unknown` should avoid polluting game history unless a future rule intentionally promotes them to `game`.
+- Renderer layout differs by kind: confirmed games may use full feature art; app/system/unknown states should use the compact right-corner artwork treatment unless there is a deliberate design change.
+- OpenXBL can return multiple active titles across devices. Title selection should score active game-like titles above app/system titles so Xbox App presence does not hide a currently playing game.
 
 ## Implementation Preferences
 - Keep the first version small: one backend endpoint that fetches/caches presence and one renderer that returns SVG.
@@ -26,7 +37,10 @@
 - Normalize gamertag/XUID handling in one place; do not duplicate lookup logic across route handlers.
 - Use explicit cache metadata in responses: `Cache-Control`, `ETag` when practical, and provider fetch timestamps in server logs.
 - Surface provider failures as a valid card state, not as a broken image response.
+- Keep presence/provider cache TTL separate from SVG response TTL. Session text is static SVG output, so active game cards need a short HTTP `max-age` while still using the backend presence cache to avoid extra OpenXBL calls.
 
 ## Documentation Expectations
 - README should clearly explain rate-limit assumptions, cache strategy, required environment variables, and deployment shape.
 - Keep examples safe: use placeholder gamertags and environment variable names, never real credentials.
+- Public deployment docs should target Vercel Serverless with Upstash Redis REST as the recommended production cache.
+- Do not remove the Vercel region warning: avoid `hkg1` and `sin1` because OpenXBL/API traffic from those regions may return `403`.
