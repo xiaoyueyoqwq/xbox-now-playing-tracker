@@ -500,11 +500,13 @@ function delay(ms) {
 
 async function attachPresenceHistory(presence) {
   const lastSeenKey = getLastSeenKey(presence);
+  const currentGameSessionKey = getCurrentGameSessionKey(presence);
 
   if (presence.isOnline) {
     const now = new Date().toISOString();
 
     if (!isGameActivity(presence)) {
+      await markCurrentGameSessionAway(currentGameSessionKey, now);
       return presence;
     }
 
@@ -521,6 +523,8 @@ async function attachPresenceHistory(presence) {
     await cache.setValue(lastSeenKey, lastSeen, LAST_SEEN_TTL_SECONDS);
 
     const sessionKey = getPlaySessionKey(presence);
+    await markCurrentGameSessionAway(currentGameSessionKey, now, sessionKey);
+
     const existingSession = normalizePlaySession(await cache.getValue(sessionKey));
     const sessionStartedAt = shouldContinuePlaySession(existingSession, now)
       ? existingSession.startedAt
@@ -532,6 +536,17 @@ async function attachPresenceHistory(presence) {
         lastObservedAt: now,
         titleId: presence.titleId || "",
         titleName: presence.titleName || "",
+        awayObservedAt: "",
+      },
+      PLAY_SESSION_TTL_SECONDS,
+    );
+    await cache.setValue(
+      currentGameSessionKey,
+      {
+        sessionKey,
+        titleId: presence.titleId || "",
+        titleName: presence.titleName || "",
+        awayObservedAt: "",
       },
       PLAY_SESSION_TTL_SECONDS,
     );
@@ -541,6 +556,11 @@ async function attachPresenceHistory(presence) {
       sessionStartedAt,
     };
   }
+
+  await markCurrentGameSessionAway(
+    currentGameSessionKey,
+    new Date().toISOString(),
+  );
 
   const lastSeen = await cache.getValue(lastSeenKey);
   if (!lastSeen) {
@@ -559,6 +579,47 @@ async function attachPresenceHistory(presence) {
   };
 }
 
+async function markCurrentGameSessionAway(
+  currentGameSessionKey,
+  now,
+  exceptSessionKey = "",
+) {
+  const currentSession = normalizeCurrentGameSession(
+    await cache.getValue(currentGameSessionKey),
+  );
+  if (
+    !currentSession
+    || !currentSession.sessionKey
+    || currentSession.sessionKey === exceptSessionKey
+    || currentSession.awayObservedAt
+  ) {
+    return;
+  }
+
+  const playSession = normalizePlaySession(
+    await cache.getValue(currentSession.sessionKey),
+  );
+  if (playSession && !playSession.awayObservedAt) {
+    await cache.setValue(
+      currentSession.sessionKey,
+      {
+        ...playSession,
+        awayObservedAt: now,
+      },
+      PLAY_SESSION_TTL_SECONDS,
+    );
+  }
+
+  await cache.setValue(
+    currentGameSessionKey,
+    {
+      ...currentSession,
+      awayObservedAt: now,
+    },
+    PLAY_SESSION_TTL_SECONDS,
+  );
+}
+
 function getPlaySessionKey(presence) {
   const playerKey = String(
     presence.xuid || presence.gamertag || "",
@@ -567,6 +628,13 @@ function getPlaySessionKey(presence) {
     presence.titleId || presence.titleName || "",
   ).toLowerCase();
   return `play-session:${playerKey}:${titleKey}`;
+}
+
+function getCurrentGameSessionKey(presence) {
+  const playerKey = String(
+    presence.xuid || presence.gamertag || "",
+  ).toLowerCase();
+  return `play-session-current:${playerKey}`;
 }
 
 function normalizePlaySession(value) {
@@ -584,6 +652,20 @@ function normalizePlaySession(value) {
     ...value,
     startedAt,
     lastObservedAt,
+    awayObservedAt: parseOptionalSessionTimestamp(value.awayObservedAt),
+  };
+}
+
+function normalizeCurrentGameSession(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  return {
+    sessionKey: String(value.sessionKey || ""),
+    titleId: String(value.titleId || ""),
+    titleName: String(value.titleName || ""),
+    awayObservedAt: parseOptionalSessionTimestamp(value.awayObservedAt),
   };
 }
 
@@ -592,18 +674,30 @@ function shouldContinuePlaySession(session, now) {
     return false;
   }
 
-  const lastObservedAtMs = Date.parse(session.lastObservedAt);
+  if (!session.awayObservedAt) {
+    return true;
+  }
+
+  const awayObservedAtMs = Date.parse(session.awayObservedAt);
   const nowMs = Date.parse(now);
-  if (Number.isNaN(lastObservedAtMs) || Number.isNaN(nowMs)) {
+  if (Number.isNaN(awayObservedAtMs) || Number.isNaN(nowMs)) {
     return false;
   }
 
-  return nowMs - lastObservedAtMs <= PLAY_SESSION_RESET_GRACE_MS;
+  return nowMs - awayObservedAtMs <= PLAY_SESSION_RESET_GRACE_MS;
 }
 
 function parseSessionTimestamp(value) {
   const timestamp = Date.parse(value);
   return Number.isNaN(timestamp) ? "" : new Date(timestamp).toISOString();
+}
+
+function parseOptionalSessionTimestamp(value) {
+  if (!value) {
+    return "";
+  }
+
+  return parseSessionTimestamp(value);
 }
 
 function getLastSeenKey(presence) {

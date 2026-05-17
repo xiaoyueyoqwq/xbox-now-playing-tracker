@@ -29,6 +29,7 @@
 - Known system titles currently include Home/Dashboard/Settings/Store/My Games & Apps/Guide. Known app titles include Xbox App, Spotify, YouTube, Netflix, Edge, Twitch, Discord, Disney+, Hulu, Prime Video, Apple TV, and Media Player.
 - `Xbox App` is a special app override: use local Xbox brand artwork instead of Microsoft Store artwork because Store-derived art can be misleading for this title.
 - Only confirmed `game` activity should write play-session and last-seen game history. `app`, `system`, and `unknown` should avoid polluting game history unless a future rule intentionally promotes them to `game`.
+- Play sessions should not reset merely because the card was not requested for a while, including redeploy and GitHub image cache gaps. Reset only after explicitly observing the player away from that game, such as offline/non-game activity or another game, for longer than the grace window.
 - Renderer layout differs by kind: confirmed games may use full feature art; app/system/unknown states should use the compact right-corner artwork treatment unless there is a deliberate design change.
 - OpenXBL can return multiple active titles across devices. Title selection should score active game-like titles above app/system titles so Xbox App presence does not hide a currently playing game.
 
