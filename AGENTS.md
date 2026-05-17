@@ -23,7 +23,7 @@
 - OpenXBL free-tier rate limits are low enough that backend caching is mandatory. Treat `150 requests/hour` as the planning budget unless a paid plan or different provider is selected.
 - Microsoft official Xbox services APIs are aimed at registered Xbox title developers and partner scenarios, not general public GitHub profile widgets.
 - Unofficial Xbox Live API wrappers can reduce vendor dependency but usually require Microsoft/Xbox authentication handling and may be more fragile than OpenXBL.
-- Treat missing XUID from OpenXBL gamertag search as provider jitter before failing. Retry at least 3 times for empty search results; retry transient request failures such as 408, 429, and 5xx, but do not retry obvious auth/config failures such as 401/403.
+- Treat missing XUID from OpenXBL gamertag search as provider jitter before failing. Cache successful gamertag -> XUID identity lookups in Redis, prefer XUID presence requests afterward, and retry XUID search with exponential backoff capped at 10 seconds. Retry transient request failures such as 408, 429, and 5xx, but do not retry obvious auth/config failures such as 401/403.
 
 ## Activity Classification
 - Presence title records do not expose a reliable `isGame` flag. Classify activity through `src/activity-classifier.js` as `game`, `app`, `system`, or `unknown`; do not collapse this into a binary game/other check.

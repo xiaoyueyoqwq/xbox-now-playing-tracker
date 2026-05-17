@@ -112,6 +112,7 @@ You can change it to another non-blocked region if latency is better for your au
 The project uses Redis for more than response caching:
 
 - Presence cache.
+- Gamertag to XUID identity cache.
 - Play session start time.
 - Last-seen game and artwork.
 - Microsoft Store image data URIs.
@@ -124,6 +125,8 @@ Redis is strongly recommended in production. Without Redis, Vercel instance chan
 Play sessions are request-driven. Vercel Serverless does not run a persistent timer; the app stores the first observed game timestamp in Redis and recomputes the elapsed minutes whenever the card endpoint is requested. A same-game session continues across short GitHub image proxy or crawler gaps, but a gap longer than 30 minutes starts a new session to avoid reviving stale play time.
 
 Refresh failures are conservative. If OpenXBL, Microsoft Store, Redis, or the scheduled refresh path fails, the app does not delete existing session or last-seen data. The card serves stale cached state when available, and the cron endpoint reports per-gamertag failures in JSON so the next successful refresh can repair state.
+
+OpenXBL gamertag search can occasionally return no XUID for a valid account. The app caches successful XUID lookups for 30 days and then queries presence by XUID directly. When XUID search still has to run, it retries with exponential backoff capped at 10 seconds before falling back to stale card data.
 
 ## Optional Cloudflare Scheduled Refresh
 

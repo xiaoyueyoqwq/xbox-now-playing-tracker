@@ -2,7 +2,9 @@ import { classifyActivity } from "./activity-classifier.js";
 import { logInfo, logWarn } from "./logger.js";
 
 const OPENXBL_REQUEST_ATTEMPTS = 4;
-const OPENXBL_RETRY_DELAY_MS = 250;
+const OPENXBL_XUID_SEARCH_ATTEMPTS = 7;
+const OPENXBL_RETRY_BASE_DELAY_MS = 250;
+const OPENXBL_RETRY_MAX_DELAY_MS = 10_000;
 
 const KNOWN_TITLE_NAMES = new Map([
   ["1794566092", "Minecraft Launcher"],
@@ -35,11 +37,21 @@ export class OpenXblProvider {
     contract = "",
     baseUrl = "https://xbl.io/api/v2",
     fetchImpl = fetch,
+    delayImpl = delay,
+    requestAttempts = OPENXBL_REQUEST_ATTEMPTS,
+    xuidSearchAttempts = OPENXBL_XUID_SEARCH_ATTEMPTS,
+    retryBaseDelayMs = OPENXBL_RETRY_BASE_DELAY_MS,
+    retryMaxDelayMs = OPENXBL_RETRY_MAX_DELAY_MS,
   }) {
     this.apiKey = apiKey;
     this.contract = contract;
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.fetch = fetchImpl;
+    this.delay = delayImpl;
+    this.requestAttempts = requestAttempts;
+    this.xuidSearchAttempts = xuidSearchAttempts;
+    this.retryBaseDelayMs = retryBaseDelayMs;
+    this.retryMaxDelayMs = retryMaxDelayMs;
   }
 
   async getPresenceByGamertag(gamertag) {
@@ -53,6 +65,22 @@ export class OpenXblProvider {
       throw new Error(`OpenXBL did not return an XUID for gamertag "${gamertag}"`);
     }
 
+    return this.getPresenceByXuid({
+      gamertag,
+      xuid,
+      profile,
+    });
+  }
+
+  async getPresenceByXuid({ gamertag, xuid, profile = null }) {
+    if (!this.apiKey) {
+      throw new Error("OPENXBL_API_KEY is not configured");
+    }
+
+    if (!xuid) {
+      throw new Error(`Missing XUID for gamertag "${gamertag}"`);
+    }
+
     const presence = await this.requestJsonWithRetry(`/${encodeURIComponent(xuid)}/presence`);
     return normalizePresence({ gamertag, xuid, profile, presence });
   }
@@ -60,16 +88,17 @@ export class OpenXblProvider {
   async searchGamertagWithRetry(gamertag) {
     let lastProfile = null;
 
-    for (let attempt = 1; attempt <= OPENXBL_REQUEST_ATTEMPTS; attempt += 1) {
+    for (let attempt = 1; attempt <= this.xuidSearchAttempts; attempt += 1) {
       const profile = await this.searchGamertag(gamertag);
       if (profile?.id) {
         return profile;
       }
 
       lastProfile = profile;
-      if (attempt < OPENXBL_REQUEST_ATTEMPTS) {
-        logWarn(`[openxbl] missing xuid for "${gamertag}", retry ${attempt}/${OPENXBL_REQUEST_ATTEMPTS - 1}`);
-        await delay(OPENXBL_RETRY_DELAY_MS * attempt);
+      if (attempt < this.xuidSearchAttempts) {
+        const retryDelayMs = this.getRetryDelayMs(attempt);
+        logWarn(`[openxbl] missing xuid for "${gamertag}", retry ${attempt}/${this.xuidSearchAttempts - 1} in ${retryDelayMs}ms`);
+        await this.delay(retryDelayMs);
       }
     }
 
@@ -87,21 +116,29 @@ export class OpenXblProvider {
   async requestJsonWithRetry(path) {
     let lastError = null;
 
-    for (let attempt = 1; attempt <= OPENXBL_REQUEST_ATTEMPTS; attempt += 1) {
+    for (let attempt = 1; attempt <= this.requestAttempts; attempt += 1) {
       try {
         return await this.requestJson(path);
       } catch (error) {
         lastError = error;
-        if (!isRetryableOpenXblError(error) || attempt === OPENXBL_REQUEST_ATTEMPTS) {
+        if (!isRetryableOpenXblError(error) || attempt === this.requestAttempts) {
           throw error;
         }
 
-        logWarn(`[openxbl] request retry ${attempt}/${OPENXBL_REQUEST_ATTEMPTS - 1} ${path}: ${formatError(error)}`);
-        await delay(OPENXBL_RETRY_DELAY_MS * attempt);
+        const retryDelayMs = this.getRetryDelayMs(attempt);
+        logWarn(`[openxbl] request retry ${attempt}/${this.requestAttempts - 1} in ${retryDelayMs}ms ${path}: ${formatError(error)}`);
+        await this.delay(retryDelayMs);
       }
     }
 
     throw lastError;
+  }
+
+  getRetryDelayMs(attempt) {
+    return Math.min(
+      this.retryMaxDelayMs,
+      this.retryBaseDelayMs * (2 ** Math.max(0, attempt - 1)),
+    );
   }
 
   async requestJson(path) {

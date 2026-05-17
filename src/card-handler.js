@@ -37,6 +37,7 @@ const IMAGE_DATA_MAX_BYTES = 600_000;
 const IMAGE_FETCH_ATTEMPTS = 3;
 const PLAY_SESSION_RESPONSE_TTL_SECONDS = 15;
 const PLAY_SESSION_OBSERVATION_GRACE_MS = 30 * 60 * 1000;
+const XUID_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60;
 const PLAY_SESSION_RESET_GRACE_MS = Math.max(
   PLAY_SESSION_OBSERVATION_GRACE_MS,
   (config.cacheTtlSeconds + 30) * 1000,
@@ -230,7 +231,7 @@ async function loadPresence(gamertag, useMock) {
     });
   }
 
-  const presence = await provider.getPresenceByGamertag(gamertag);
+  const presence = await getOpenXblPresence(gamertag);
   const localClassification = classifyActivity({
     titleId: presence.titleId,
     titleName: presence.titleName,
@@ -275,6 +276,45 @@ async function loadPresence(gamertag, useMock) {
   const embeddedPresence = await embedPresenceArtwork(classifiedPresence);
 
   return attachPresenceHistory(embeddedPresence);
+}
+
+async function getOpenXblPresence(gamertag) {
+  const xuidCacheKey = getXuidCacheKey(gamertag);
+  const cachedIdentity = await cache.getValue(xuidCacheKey);
+  if (cachedIdentity?.xuid) {
+    try {
+      const presence = await provider.getPresenceByXuid({
+        gamertag,
+        xuid: cachedIdentity.xuid,
+        profile: cachedIdentity.profile || null,
+      });
+      return presence;
+    } catch (error) {
+      logWarn(
+        `[openxbl] cached xuid failed for "${gamertag}"; falling back to gamertag search: ${formatError(error)}`,
+      );
+    }
+  }
+
+  const presence = await provider.getPresenceByGamertag(gamertag);
+  if (presence.xuid) {
+    await cache.setValue(
+      xuidCacheKey,
+      {
+        xuid: presence.xuid,
+        profile: {
+          id: presence.xuid,
+          settings: [
+            { id: "Gamertag", value: presence.gamertag || gamertag },
+            { id: "GameDisplayPicRaw", value: presence.avatarUrl || "" },
+          ],
+        },
+      },
+      XUID_CACHE_TTL_SECONDS,
+    );
+  }
+
+  return presence;
 }
 
 async function ensureRenderablePresence(presence) {
@@ -340,6 +380,10 @@ function getConfiguredGamertags() {
   }
 
   return gamertags;
+}
+
+function getXuidCacheKey(gamertag) {
+  return `xuid:${String(gamertag || "").toLowerCase()}`;
 }
 
 function shouldWarnForTitleArtFailure(classification) {
