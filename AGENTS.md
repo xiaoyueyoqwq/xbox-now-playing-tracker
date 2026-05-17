@@ -39,7 +39,7 @@
 - Use explicit cache metadata in responses: `Cache-Control`, `ETag` when practical, and provider fetch timestamps in server logs.
 - Surface provider failures as a valid card state, not as a broken image response.
 - Keep presence/provider cache TTL separate from SVG response TTL. Session text is static SVG output, so active game cards need a short HTTP `max-age` while still using the backend presence cache to avoid extra OpenXBL calls.
-- SVG card typography must not depend on Vercel or GitHub viewer system fonts. Keep card fonts in `fonts/` and embed them into the SVG output when stable visual layout matters.
+- SVG card typography must not depend on Vercel or GitHub viewer system fonts. Keep card fonts in `fonts/` and render visible card text as SVG paths when stable visual layout matters, because SVGs embedded through `<img>` can apply fonts differently from standalone SVG documents.
 
 ## Documentation Expectations
 - README should clearly explain rate-limit assumptions, cache strategy, required environment variables, and deployment shape.

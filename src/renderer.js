@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs";
+import opentype from "opentype.js";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 const WIDTH = 480;
 const HEIGHT = 160;
 const FONT_FAMILY = "XboxCard, Segoe UI, Ubuntu, Cantarell, sans-serif";
-const FONT_FACE_CSS = createFontFaceCss();
+const TEXT_FONTS = loadTextFonts();
 const FEATURE_ART_URL = "/img/Xbox_bg.png";
 const h = React.createElement;
 
@@ -72,7 +73,7 @@ function XboxNowPlayingCard({ presence }) {
       h(
         "style",
         null,
-        `${FONT_FACE_CSS}.noSelect{user-select:none;-webkit-user-select:none}.titleText{user-select:text;-webkit-user-select:text}`,
+        ".noSelect{user-select:none;-webkit-user-select:none}.titleText{user-select:text;-webkit-user-select:text}",
       ),
       h(
         "linearGradient",
@@ -339,6 +340,12 @@ function XboxLogoMark({ x, y, size, color }) {
 }
 
 function Text({ children, ...props }) {
+  const text = normalizeTextChildren(children);
+  const textPath = createTextPath(text, props);
+  if (textPath) {
+    return textPath;
+  }
+
   return h(
     "text",
     {
@@ -349,13 +356,167 @@ function Text({ children, ...props }) {
   );
 }
 
-function createFontFaceCss() {
+function loadTextFonts() {
   try {
-    const font = readFileSync(new URL("../fonts/SpaceGrotesk-Medium.ttf", import.meta.url));
-    return `@font-face{font-family:XboxCard;src:url(data:font/ttf;base64,${font.toString("base64")}) format("truetype");font-weight:400 900;font-style:normal;font-display:block;}`;
+    return {
+      regular: parseFontFile("../fonts/Selawik-Regular.ttf"),
+      semiBold: parseFontFile("../fonts/Selawik-SemiBold.ttf"),
+      bold: parseFontFile("../fonts/Selawik-Bold.ttf"),
+    };
   } catch {
-    return "";
+    return null;
   }
+}
+
+function parseFontFile(filename) {
+  const buffer = readFileSync(new URL(filename, import.meta.url));
+  const arrayBuffer = buffer.buffer.slice(
+    buffer.byteOffset,
+    buffer.byteOffset + buffer.byteLength,
+  );
+  return opentype.parse(arrayBuffer);
+}
+
+function normalizeTextChildren(children) {
+  if (typeof children === "string" || typeof children === "number") {
+    return String(children);
+  }
+
+  if (Array.isArray(children) && children.length === 1) {
+    return normalizeTextChildren(children[0]);
+  }
+
+  return null;
+}
+
+function createTextPath(text, props) {
+  if (!TEXT_FONTS || text === null || text === "") {
+    return null;
+  }
+
+  const {
+    x = 0,
+    y = 0,
+    fill = "#ffffff",
+    fontSize = "16",
+    fontWeight = "400",
+    letterSpacing = 0,
+    textAnchor = "start",
+    textLength,
+    lengthAdjust,
+    fontFamily,
+    children,
+    ...restProps
+  } = props;
+
+  const font = getPathFont(fontWeight, fontFamily);
+  if (!font) {
+    return null;
+  }
+
+  const size = Number.parseFloat(fontSize);
+  if (!Number.isFinite(size) || size <= 0) {
+    return null;
+  }
+
+  const spacing = parseLetterSpacing(letterSpacing, size);
+  const xNumber = Number.parseFloat(x);
+  const yNumber = Number.parseFloat(y);
+  if (!Number.isFinite(xNumber) || !Number.isFinite(yNumber)) {
+    return null;
+  }
+
+  const naturalWidth = getPathTextWidth(font, text, size, spacing);
+  const targetWidth = Number.parseFloat(textLength);
+  const scaleX = Number.isFinite(targetWidth)
+    && targetWidth > 0
+    && naturalWidth > 0
+    && lengthAdjust === "spacingAndGlyphs"
+      ? targetWidth / naturalWidth
+      : 1;
+  const anchoredX = getAnchoredTextX(xNumber, naturalWidth * scaleX, textAnchor);
+  const pathData = getTextPathData(font, text, anchoredX, yNumber, size, spacing);
+  if (!pathData) {
+    return null;
+  }
+
+  const transform = scaleX === 1
+    ? restProps.transform
+    : `${restProps.transform ? `${restProps.transform} ` : ""}translate(${roundSvgNumber(anchoredX)} 0) scale(${roundSvgNumber(scaleX)} 1) translate(${-roundSvgNumber(anchoredX)} 0)`;
+
+  return h("path", {
+    ...restProps,
+    d: pathData,
+    fill,
+    transform,
+  });
+}
+
+function getPathFont(fontWeight, fontFamily) {
+  if (String(fontFamily || "").toLowerCase().includes("mono")) {
+    return null;
+  }
+
+  const weight = Number.parseInt(fontWeight, 10);
+  if (weight >= 700) {
+    return TEXT_FONTS.bold;
+  }
+
+  if (weight >= 600) {
+    return TEXT_FONTS.semiBold;
+  }
+
+  return TEXT_FONTS.regular;
+}
+
+function parseLetterSpacing(value, fontSize) {
+  const text = String(value ?? "0").trim();
+  if (!text || text === "0") {
+    return 0;
+  }
+
+  if (text.endsWith("em")) {
+    const em = Number.parseFloat(text);
+    return Number.isFinite(em) ? em * fontSize : 0;
+  }
+
+  const px = Number.parseFloat(text);
+  return Number.isFinite(px) ? px : 0;
+}
+
+function getPathTextWidth(font, text, fontSize, letterSpacing) {
+  return font.getAdvanceWidth(text, fontSize)
+    + Math.max(0, Array.from(text).length - 1) * letterSpacing;
+}
+
+function getAnchoredTextX(x, width, textAnchor) {
+  if (textAnchor === "middle") {
+    return x - width / 2;
+  }
+
+  if (textAnchor === "end") {
+    return x - width;
+  }
+
+  return x;
+}
+
+function getTextPathData(font, text, x, y, fontSize, letterSpacing) {
+  if (!letterSpacing) {
+    return font.getPath(text, x, y, fontSize).toPathData({
+      decimalPlaces: 2,
+      flipY: false,
+    });
+  }
+
+  let cursorX = x;
+  return Array.from(text).map((character) => {
+    const pathData = font
+      .getPath(character, cursorX, y, fontSize)
+      .toPathData({ decimalPlaces: 2, flipY: false });
+    cursorX += font.getAdvanceWidth(character, fontSize) + letterSpacing;
+    return pathData;
+  }).join("");
 }
 
 function GamertagSessionLine({ x, y, gamertag, duration }) {
