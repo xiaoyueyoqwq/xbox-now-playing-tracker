@@ -131,12 +131,85 @@ GitHub image proxy requests are not guaranteed to arrive on a schedule. For a st
 
 The Worker uses the Cron Trigger in `workers/presence-refresh/wrangler.toml` to call the protected refresh endpoint. Its normal HTTP `fetch()` handler returns an empty `404`, so crawlers cannot use the Worker as a public refresh URL.
 
-Set Worker variables:
+1. Set `CRON_SECRET` in Vercel.
+
+Generate a long random value:
+
+```bash
+openssl rand -hex 32
+```
+
+Add the result to your Vercel project:
+
+```text
+Settings -> Environment Variables -> CRON_SECRET
+```
+
+Redeploy the Vercel project after adding the variable.
+
+2. Verify the protected refresh endpoint.
+
+Call Vercel directly with the same secret:
+
+```bash
+curl -i \
+  -H "Authorization: Bearer YOUR_CRON_SECRET" \
+  "https://your-project.vercel.app/api/cron/refresh"
+```
+
+Expected result:
+
+- `200` means all configured gamertags refreshed successfully.
+- `207` means the endpoint ran, but at least one gamertag failed. Check the JSON body and Vercel logs.
+- `401` means the Bearer token does not match `CRON_SECRET`.
+- `503` means `CRON_SECRET` is missing in Vercel.
+
+3. Create the Cloudflare Worker from this repository.
+
+In Cloudflare:
+
+```text
+Workers & Pages -> Create -> Import a repository
+```
+
+Use these build settings:
+
+```text
+Root directory: workers/presence-refresh
+Deploy command: npx wrangler deploy
+```
+
+The Worker config is already in `workers/presence-refresh/wrangler.toml`:
+
+```toml
+name = "xbox-refresh-cron"
+main = "src/index.js"
+compatibility_date = "2026-05-17"
+
+[triggers]
+crons = ["*/15 * * * *"]
+```
+
+4. Set Worker variables.
+
+In the Worker settings, add:
 
 ```text
 REFRESH_URL=https://your-project.vercel.app/api/cron/refresh
 CRON_SECRET=the-same-value-as-vercel-cron-secret
 ```
+
+Set `CRON_SECRET` as a secret value. `REFRESH_URL` can be a normal variable.
+
+5. Confirm it is working.
+
+Browser visits to the Worker URL should return an empty `404`; this is intentional. The scheduled job runs through Cloudflare's Cron Trigger and invokes the Worker's `scheduled()` handler instead of the HTTP `fetch()` handler.
+
+Check:
+
+- Cloudflare Worker logs for scheduled invocations.
+- Vercel logs for `GET /api/cron/refresh`.
+- Card logs such as `cache=stale-refresh` or `cron=refresh`.
 
 At 15-minute intervals this costs about 4 refreshes per hour per configured deployment, before OpenXBL provider retries. Keep `ALLOWED_GAMERTAGS` small on the free OpenXBL plan.
 
