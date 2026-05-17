@@ -27,6 +27,7 @@ const LAST_SEEN_TTL_SECONDS = 30 * 24 * 60 * 60;
 const IMAGE_DATA_TTL_SECONDS = 12 * 60 * 60;
 const IMAGE_FETCH_TIMEOUT_MS = 5000;
 const IMAGE_DATA_MAX_BYTES = 600_000;
+const IMAGE_FETCH_ATTEMPTS = 3;
 const PLAY_SESSION_RESPONSE_TTL_SECONDS = 15;
 const PLAY_SESSION_RESET_GRACE_MS = Math.max(
   5 * 60 * 1000,
@@ -292,34 +293,39 @@ async function resolveImageDataUri(url, size) {
     return url || "";
   }
 
-  const imageUrl = size ? getSizedStoreImageUrl(url, size) : url;
-  const cacheKey = getImageDataCacheKey(imageUrl);
-  if (!config.noImageCache) {
-    const cached = await cache.getValue(cacheKey);
-    if (cached?.dataUri) {
-      logInfo(`[image] hit ${shortImageUrl(imageUrl)} ms=${Date.now() - startedAt}`);
-      return cached.dataUri;
+  const candidates = getImageDataUriCandidates(url, size);
+  for (const [index, imageUrl] of candidates.entries()) {
+    const cacheKey = getImageDataCacheKey(imageUrl);
+    if (!config.noImageCache) {
+      const cached = await cache.getValue(cacheKey);
+      if (cached?.dataUri) {
+        logInfo(`[image] hit ${shortImageUrl(imageUrl)} ms=${Date.now() - startedAt}`);
+        return cached.dataUri;
+      }
+    }
+
+    try {
+      const dataUri = await fetchImageDataUriWithRetry(imageUrl);
+      if (config.noImageCache) {
+        logInfo(`[image] bypass ${shortImageUrl(imageUrl)} bytes=${dataUri.length} ms=${Date.now() - startedAt}`);
+      } else {
+        await cache.setValue(cacheKey, { dataUri }, IMAGE_DATA_TTL_SECONDS);
+        logInfo(`[image] cached ${shortImageUrl(imageUrl)} bytes=${dataUri.length} ms=${Date.now() - startedAt}`);
+      }
+      return dataUri;
+    } catch (error) {
+      const hasNextCandidate = index < candidates.length - 1;
+      if (hasNextCandidate) {
+        logWarn(`Image candidate failed for ${shortImageUrl(imageUrl)}: ${formatError(error)}; trying fallback`);
+        continue;
+      }
+
+      logWarn(`Image data cache failed for ${shortImageUrl(imageUrl)}: ${formatError(error)} ms=${Date.now() - startedAt}`);
+      return "";
     }
   }
 
-  try {
-    const dataUri = await fetchImageDataUri(imageUrl);
-    if (config.noImageCache) {
-      logInfo(`[image] bypass ${shortImageUrl(imageUrl)} bytes=${dataUri.length} ms=${Date.now() - startedAt}`);
-    } else {
-      await cache.setValue(cacheKey, { dataUri }, IMAGE_DATA_TTL_SECONDS);
-      logInfo(`[image] cached ${shortImageUrl(imageUrl)} bytes=${dataUri.length} ms=${Date.now() - startedAt}`);
-    }
-    return dataUri;
-  } catch (error) {
-    if (size) {
-      logWarn(`Image resize failed for ${imageUrl}: ${formatError(error)}; retrying original`);
-      return resolveImageDataUri(url, null);
-    }
-
-    logWarn(`Image data cache failed for ${imageUrl}: ${formatError(error)} ms=${Date.now() - startedAt}`);
-    return "";
-  }
+  return "";
 }
 
 export async function shutdownCardHandler() {
@@ -398,6 +404,57 @@ function getSizedStoreImageUrl(url, { width, height }) {
   return imageUrl.toString();
 }
 
+function getImageDataUriCandidates(url, size) {
+  if (!size) {
+    return [url];
+  }
+
+  const sizes = getFallbackImageSizes(size);
+  return [
+    ...sizes.map((fallbackSize) => getSizedStoreImageUrl(url, fallbackSize)),
+    url,
+  ];
+}
+
+function getFallbackImageSizes({ width, height }) {
+  const minDimension = Math.min(width, height);
+  const maxDimension = Math.max(width, height);
+  if (maxDimension >= 640) {
+    return [
+      { width, height },
+      { width: 512, height: 288 },
+      { width: 384, height: 216 },
+    ];
+  }
+
+  if (minDimension >= 256) {
+    return [
+      { width, height },
+      { width: 192, height: 192 },
+      { width: 128, height: 128 },
+    ];
+  }
+
+  return [{ width, height }];
+}
+
+async function fetchImageDataUriWithRetry(url) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= IMAGE_FETCH_ATTEMPTS; attempt += 1) {
+    try {
+      return await fetchImageDataUri(url);
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableImageError(error) || attempt === IMAGE_FETCH_ATTEMPTS) {
+        throw error;
+      }
+      await delay(150 * attempt);
+    }
+  }
+
+  throw lastError;
+}
+
 async function fetchImageDataUri(url) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS);
@@ -425,6 +482,20 @@ async function fetchImageDataUri(url) {
   }
 
   return `data:${contentType.split(";")[0]};base64,${buffer.toString("base64")}`;
+}
+
+function isRetryableImageError(error) {
+  const message = error?.message || String(error);
+  return error?.name === "AbortError"
+    || message.includes("aborted")
+    || message.includes("fetch failed")
+    || message.includes("image request failed: 408")
+    || message.includes("image request failed: 429")
+    || /image request failed: 5\d\d/.test(message);
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function attachPresenceHistory(presence) {
