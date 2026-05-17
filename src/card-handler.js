@@ -272,7 +272,7 @@ function applyActivityArtworkOverrides(presence) {
   return {
     ...presence,
     titleArtUrl: "/img/Xbox_Logo_White.svg",
-    titleHeroUrl: "",
+    titleHeroUrl: "/img/Xbox_bg.png",
     titleArtSource: "local-xbox-app-override",
   };
 }
@@ -283,10 +283,13 @@ function shouldWarnForTitleArtFailure(classification) {
 }
 
 async function embedRemoteArtwork(presence) {
+  const shouldResolveAvatar = shouldResolveAvatarArtwork(presence);
   const [titleArtUrl, titleHeroUrl, avatarUrl] = await Promise.all([
     resolveImageDataUri(presence.titleArtUrl, { width: 256, height: 256 }),
     resolveImageDataUri(presence.titleHeroUrl, { width: 640, height: 360 }),
-    resolveImageDataUri(presence.avatarUrl, { width: 256, height: 256 }),
+    shouldResolveAvatar
+      ? resolveImageDataUri(presence.avatarUrl, { width: 256, height: 256 })
+      : Promise.resolve(presence.avatarUrl || ""),
   ]);
 
   return {
@@ -297,8 +300,18 @@ async function embedRemoteArtwork(presence) {
   };
 }
 
+function shouldResolveAvatarArtwork(presence) {
+  return !isGameActivity(presence)
+    && !presence.titleArtUrl
+    && Boolean(presence.avatarUrl);
+}
+
 async function resolveImageDataUri(url, size) {
   const startedAt = Date.now();
+  if (isLocalImageUrl(url)) {
+    return readLocalImageDataUri(getLocalImageFilename(url));
+  }
+
   if (!shouldEmbedImage(url)) {
     return url || "";
   }
@@ -400,6 +413,15 @@ function shouldEmbedImage(url) {
     || value.startsWith("https://images-eds.xboxlive.com/")
     || value.startsWith("https://avatar-ssl.xboxlive.com/")
     || value.startsWith("https://avatar.xboxlive.com/");
+}
+
+function isLocalImageUrl(url) {
+  return String(url ?? "").startsWith("/img/");
+}
+
+function getLocalImageFilename(url) {
+  const localUrl = new URL(String(url), "http://localhost");
+  return path.basename(localUrl.pathname);
 }
 
 function getImageDataCacheKey(url) {

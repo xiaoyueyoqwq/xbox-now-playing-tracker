@@ -867,7 +867,7 @@ function getActiveDetail(presence) {
 
 function getFeatureArtUrl(presence) {
   if (isXboxAppActivity(presence)) {
-    return FEATURE_ART_URL;
+    return presence.titleHeroUrl || FEATURE_ART_URL;
   }
 
   if (getFeatureMode(presence) === "full") {
