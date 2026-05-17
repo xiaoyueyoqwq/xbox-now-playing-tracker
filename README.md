@@ -127,40 +127,9 @@ Refresh failures are conservative. If OpenXBL, Microsoft Store, Redis, or the sc
 
 ## Optional Cloudflare Scheduled Refresh
 
-GitHub image proxy requests are not guaranteed to arrive on a schedule. For a steadier 15-30 minute observation window without Vercel Pro, use a Cloudflare Worker Cron Trigger to call the protected refresh endpoint.
+GitHub image proxy requests are not guaranteed to arrive on a schedule. For a steadier 15-30 minute observation window without Vercel Pro, deploy the bundled Cloudflare Worker in `workers/presence-refresh/`.
 
-Worker example:
-
-```js
-export default {
-  async scheduled(_event, env, ctx) {
-    ctx.waitUntil(refresh(env));
-  },
-};
-
-async function refresh(env) {
-  const response = await fetch(env.REFRESH_URL, {
-    headers: {
-      Authorization: `Bearer ${env.CRON_SECRET}`,
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`refresh failed: ${response.status}`);
-  }
-}
-```
-
-`wrangler.toml`:
-
-```toml
-name = "xbox-now-playing-refresh"
-main = "src/index.js"
-compatibility_date = "2026-05-18"
-
-[triggers]
-crons = ["*/15 * * * *"]
-```
+The Worker uses a Cron Trigger to call the protected refresh endpoint. Its normal HTTP `fetch()` handler returns `404`, so crawlers cannot use the Worker as a public refresh URL.
 
 Set Worker variables:
 

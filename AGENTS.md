@@ -44,7 +44,7 @@
 - Surface provider failures as a valid card state, not as a broken image response.
 - Keep presence/provider cache TTL separate from SVG response TTL. Session text is static SVG output, so active game cards need a short HTTP `max-age` while still using the backend presence cache to avoid extra OpenXBL calls.
 - In Vercel/Serverless paths, do not depend on background work after `response.end()` for correctness-critical presence state. Stale presence must be refreshed before responding, and old stale SVG should be served only when that refresh fails.
-- Optional proactive refresh should be implemented as external scheduled HTTP calls, for example Cloudflare Worker Cron Trigger -> `/api/cron/refresh`, not as an in-process background loop.
+- Optional proactive refresh should be implemented as external scheduled HTTP calls, for example Cloudflare Worker Cron Trigger -> `/api/cron/refresh`, not as an in-process background loop. The bundled Worker should remain outbound-only: normal HTTP requests return 404, and only `scheduled()` calls the refresh endpoint.
 - Remote image embedding uses two cache layers: `image-data:<hash(candidateUrl)>` stores data URIs, while `image-candidate:<hash(sourceUrl,purpose,size)>` stores the last successful resized URL for 12 hours so known-bad 4xx resize variants are not retried first.
 - SVG card typography must not depend on Vercel or GitHub viewer system fonts. Keep card fonts in `fonts/` and render visible card text as SVG paths when stable visual layout matters, because SVGs embedded through `<img>` can apply fonts differently from standalone SVG documents.
 

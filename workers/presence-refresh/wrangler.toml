@@ -1,0 +1,6 @@
+name = "xbox-now-playing-refresh"
+main = "src/index.js"
+compatibility_date = "2026-05-18"
+
+[triggers]
+crons = ["*/15 * * * *"]
