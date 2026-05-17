@@ -1,9 +1,11 @@
+import { readFileSync } from "node:fs";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 const WIDTH = 480;
 const HEIGHT = 160;
-const FONT_FAMILY = "Segoe UI, Ubuntu, Cantarell, sans-serif";
+const FONT_FAMILY = "XboxCard, Segoe UI, Ubuntu, Cantarell, sans-serif";
+const FONT_FACE_CSS = createFontFaceCss();
 const FEATURE_ART_URL = "/img/Xbox_bg.png";
 const h = React.createElement;
 
@@ -70,7 +72,7 @@ function XboxNowPlayingCard({ presence }) {
       h(
         "style",
         null,
-        ".noSelect{user-select:none;-webkit-user-select:none}.titleText{user-select:text;-webkit-user-select:text}",
+        `${FONT_FACE_CSS}.noSelect{user-select:none;-webkit-user-select:none}.titleText{user-select:text;-webkit-user-select:text}`,
       ),
       h(
         "linearGradient",
@@ -345,6 +347,15 @@ function Text({ children, ...props }) {
     },
     children,
   );
+}
+
+function createFontFaceCss() {
+  try {
+    const font = readFileSync(new URL("../fonts/SpaceGrotesk-Medium.ttf", import.meta.url));
+    return `@font-face{font-family:XboxCard;src:url(data:font/ttf;base64,${font.toString("base64")}) format("truetype");font-weight:400 900;font-style:normal;font-display:block;}`;
+  } catch {
+    return "";
+  }
 }
 
 function GamertagSessionLine({ x, y, gamertag, duration }) {
