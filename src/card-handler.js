@@ -1,10 +1,15 @@
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { classifyActivity, isGameActivity } from "./activity-classifier.js";
 import { applyArtworkPolicy, shouldEmbedAvatarArtwork } from "./artwork-manager.js";
 import { createPresenceCache } from "./cache.js";
 import { getConfig } from "./config.js";
+import {
+  getImageCandidateCacheKey,
+  getImageDataCacheKey,
+  getImageDataUriCandidates,
+  prioritizeImageCandidates,
+} from "./image-candidates.js";
 import { logInfo, logWarn } from "./logger.js";
 import { OpenXblProvider } from "./openxbl.js";
 import { renderCard } from "./renderer.js";
@@ -294,12 +299,28 @@ async function embedPresenceArtwork(presence) {
     coverImageUrl,
     featureImageUrl,
   ] = await Promise.all([
-    resolveArtworkUrl(presence.titleArtUrl, { width: 256, height: 256 }),
-    resolveArtworkUrl(presence.titleHeroUrl, { width: 640, height: 360 }),
+    resolveArtworkUrl(presence.titleArtUrl, {
+      purpose: "cover",
+      width: 256,
+      height: 256,
+    }),
+    resolveArtworkUrl(presence.titleHeroUrl, {
+      purpose: "hero",
+      width: 640,
+      height: 360,
+    }),
     shouldResolveAvatar
-      ? resolveArtworkUrl(presence.avatarUrl, { width: 256, height: 256 })
+      ? resolveArtworkUrl(presence.avatarUrl, {
+        purpose: "avatar",
+        width: 256,
+        height: 256,
+      })
       : Promise.resolve(presence.avatarUrl || ""),
-    resolveArtworkUrl(resolvedPresence.coverImageUrl, { width: 256, height: 256 }),
+    resolveArtworkUrl(resolvedPresence.coverImageUrl, {
+      purpose: resolvedPresence.coverSource === "avatar" ? "avatar" : "cover",
+      width: 256,
+      height: 256,
+    }),
     resolveArtworkUrl(resolvedPresence.featureImageUrl, getArtworkSize(resolvedPresence.featureSource)),
   ]);
 
@@ -326,12 +347,22 @@ function createArtworkUrlResolver() {
 }
 
 function getArtworkSize(source) {
-  return source === "title-art"
-    ? { width: 256, height: 256 }
-    : { width: 640, height: 360 };
+  if (source === "title-art") {
+    return {
+      purpose: "cover",
+      width: 256,
+      height: 256,
+    };
+  }
+
+  return {
+    purpose: "hero",
+    width: 640,
+    height: 360,
+  };
 }
 
-async function resolveImageDataUri(url, size) {
+async function resolveImageDataUri(url, request) {
   const startedAt = Date.now();
   if (isLocalImageUrl(url)) {
     return readLocalImageDataUri(getLocalImageFilename(url));
@@ -341,7 +372,7 @@ async function resolveImageDataUri(url, size) {
     return url || "";
   }
 
-  const candidates = getImageDataUriCandidates(url, size);
+  const candidates = await getPrioritizedImageDataUriCandidates(url, request);
   for (const [index, imageUrl] of candidates.entries()) {
     const cacheKey = getImageDataCacheKey(imageUrl);
     if (!config.noImageCache) {
@@ -358,6 +389,11 @@ async function resolveImageDataUri(url, size) {
         logInfo(`[image] bypass ${shortImageUrl(imageUrl)} bytes=${dataUri.length} ms=${Date.now() - startedAt}`);
       } else {
         await cache.setValue(cacheKey, { dataUri }, IMAGE_DATA_TTL_SECONDS);
+        await cache.setValue(
+          getImageCandidateCacheKey(url, request),
+          { imageUrl },
+          IMAGE_DATA_TTL_SECONDS,
+        );
         logInfo(`[image] cached ${shortImageUrl(imageUrl)} bytes=${dataUri.length} ms=${Date.now() - startedAt}`);
       }
       return dataUri;
@@ -449,50 +485,19 @@ function getLocalImageFilename(url) {
   return path.basename(localUrl.pathname);
 }
 
-function getImageDataCacheKey(url) {
-  const hash = createHash("sha256").update(url).digest("hex").slice(0, 32);
-  return `image-data:${hash}`;
-}
-
-function getSizedStoreImageUrl(url, { width, height }) {
-  const imageUrl = new URL(url);
-  imageUrl.searchParams.set("w", String(width));
-  imageUrl.searchParams.set("h", String(height));
-  return imageUrl.toString();
-}
-
-function getImageDataUriCandidates(url, size) {
-  if (!size) {
-    return [url];
+async function getPrioritizedImageDataUriCandidates(url, request) {
+  const candidates = getImageDataUriCandidates(url, request);
+  if (config.noImageCache || candidates.length <= 1) {
+    return candidates;
   }
 
-  const sizes = getFallbackImageSizes(size);
-  return [
-    ...sizes.map((fallbackSize) => getSizedStoreImageUrl(url, fallbackSize)),
-    url,
-  ];
-}
-
-function getFallbackImageSizes({ width, height }) {
-  const minDimension = Math.min(width, height);
-  const maxDimension = Math.max(width, height);
-  if (maxDimension >= 640) {
-    return [
-      { width, height },
-      { width: 512, height: 288 },
-      { width: 384, height: 216 },
-    ];
+  const cachedCandidate = await cache.getValue(getImageCandidateCacheKey(url, request));
+  const cachedImageUrl = cachedCandidate?.imageUrl;
+  if (!cachedImageUrl || !candidates.includes(cachedImageUrl)) {
+    return candidates;
   }
 
-  if (minDimension >= 256) {
-    return [
-      { width, height },
-      { width: 192, height: 192 },
-      { width: 128, height: 128 },
-    ];
-  }
-
-  return [{ width, height }];
+  return prioritizeImageCandidates(candidates, cachedImageUrl);
 }
 
 async function fetchImageDataUriWithRetry(url) {
