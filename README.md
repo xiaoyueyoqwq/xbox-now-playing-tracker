@@ -129,7 +129,7 @@ Refresh failures are conservative. If OpenXBL, Microsoft Store, Redis, or the sc
 
 GitHub image proxy requests are not guaranteed to arrive on a schedule. For a steadier 15-30 minute observation window without Vercel Pro, deploy the bundled Cloudflare Worker in `workers/presence-refresh/`.
 
-The Worker uses a Cron Trigger to call the protected refresh endpoint. Its normal HTTP `fetch()` handler returns `404`, so crawlers cannot use the Worker as a public refresh URL.
+The Worker uses the Cron Trigger in `workers/presence-refresh/wrangler.toml` to call the protected refresh endpoint. Its normal HTTP `fetch()` handler returns an empty `404`, so crawlers cannot use the Worker as a public refresh URL.
 
 Set Worker variables:
 
