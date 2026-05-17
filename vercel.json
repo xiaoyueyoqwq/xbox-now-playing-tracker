@@ -15,8 +15,12 @@
   ],
   "rewrites": [
     {
+      "source": "/",
+      "destination": "/index.html"
+    },
+    {
       "source": "/favicon.ico",
-      "destination": "/img/favicon.ico"
+      "destination": "/img/favicon.svg"
     },
     {
       "source": "/img/:path*",

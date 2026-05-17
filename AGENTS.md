@@ -13,6 +13,7 @@
 - Do not call Xbox APIs once per image view. Always serve from application cache or edge cache when possible.
 - Prefer stale-but-recent presence over rate-limit failures. A 2-5 minute freshness window is acceptable for a profile card.
 - Do not expose Xbox API keys, user tokens, XUIDs tied to private accounts, or service credentials in client-side code or public examples.
+- Live non-mock card requests must be restricted to configured gamertags before cache/provider lookup. Unknown gamertags should return `403 text/plain` with self-hosting guidance, not a normal SVG card, so public deployments do not become OpenXBL proxies.
 - Redis is not only response cache: it also stores last-seen game, session timers, and image data. If TCP Redis disconnects, rebuild the Redis client and retry once before falling back to memory; otherwise offline cards can lose last-seen artwork.
 
 ## API Notes

@@ -8,20 +8,16 @@ An embeddable Xbox presence card for GitHub profiles and other Markdown surfaces
 
 The endpoint returns an SVG image. It is designed for public, unauthenticated image requests, while provider calls and API keys stay server-side.
 
-## Features
+Open the deployment root URL to generate Markdown and HTML embed snippets:
 
-- Current Xbox presence from OpenXBL.
-- Game/app/system classification: `game`, `app`, `system`, `unknown`.
-- Microsoft Store artwork lookup for game icons and hero images.
-- Play session timer for confirmed games.
-- Last-seen game state when the player goes offline.
-- Xbox profile avatar fallback for non-game states without title artwork.
-- Redis-backed cache for Vercel Serverless.
-- Local mock mode for UI testing without an API key.
+```text
+https://your-project.vercel.app/
+```
 
 ## API Shape
 
 ```text
+GET /
 GET /api/card?gamertag=YourGamertag
 GET /api/card?gamertag=YourGamertag&refresh=1
 GET /api/card?gamertag=YourGamertag&mock=1
@@ -34,7 +30,7 @@ GET /api/health
 
 1. Fork or clone this repository.
 
-2. Create an OpenXBL API key at `https://xbl.io`.
+2. Create an OpenXBL account and create an API key at `https://xbl.io`.
 
 3. Create a Redis database. Upstash Redis REST is recommended for Vercel Serverless because it avoids long-lived TCP connection issues.
 
@@ -55,12 +51,14 @@ STALE_TTL_SECONDS=86400
 NO_CACHE=0
 NO_IMAGE_CACHE=0
 DEFAULT_GAMERTAG=YourGamertag
+ALLOWED_GAMERTAGS=YourGamertag
 ```
 
 7. Deploy, then test:
 
 ```text
 https://your-project.vercel.app/api/health
+https://your-project.vercel.app/
 https://your-project.vercel.app/api/card?gamertag=YourGamertag
 ```
 
@@ -101,6 +99,7 @@ You can change it to another non-blocked region if latency is better for your au
 | `NO_CACHE` | No | `1` bypasses presence cache reads for debugging. |
 | `NO_IMAGE_CACHE` | No | `1` bypasses Store/avatar data URI cache for debugging. |
 | `DEFAULT_GAMERTAG` | No | Used when `?gamertag=` is omitted. |
+| `ALLOWED_GAMERTAGS` | Recommended | Comma-separated gamertag allowlist for live OpenXBL requests. `DEFAULT_GAMERTAG` is also allowed automatically. |
 | `PORT` | Local only | Local preview port. Default is `3000`. |
 
 ## Cache Strategy
@@ -132,6 +131,7 @@ http://localhost:3000/api/card?gamertag=YourGamertag&mock=1
 http://localhost:3000/api/card?gamertag=YourGamertag
 http://localhost:3000/api/card?gamertag=YourGamertag&refresh=1
 http://localhost:3000/api/health
+http://localhost:3000/
 ```
 
 Commands:
@@ -139,7 +139,7 @@ Commands:
 ```bash
 pnpm dev        # local preview with node --watch
 pnpm preview    # local preview without watch mode
-pnpm vercel:dev # Vercel CLI development server
+pnpm vercel:dev # Vercel CLI through pnpm dlx
 ```
 
 ## Activity Classification
@@ -172,18 +172,21 @@ OpenXBL free-tier limits are low enough that per-view provider calls are not acc
 - OpenXBL refreshes are coalesced per player.
 - Provider failures produce a valid SVG instead of a broken image.
 
+Live OpenXBL requests are restricted to configured gamertags. If a request uses a gamertag that is not in `DEFAULT_GAMERTAG` or `ALLOWED_GAMERTAGS`, the endpoint returns `403 text/plain` with a self-hosting message instead of calling OpenXBL. `mock=1` remains public so the generator page can preview cards without spending API quota.
+
 ## Security
 
 - Keep `OPENXBL_API_KEY` server-side.
 - Do not commit `.env` or Vercel environment files.
 - Do not expose Redis tokens publicly.
-- The public card endpoint should not require a user token.
+- Do not treat a deployment as a shared public Xbox lookup service; allowlist only the gamertags you own or explicitly support.
 
 ## Project Structure
 
 ```text
 api/                 Vercel Serverless endpoints
 img/                 Local static assets
+index.html           Markdown snippet generator
 scripts/dev-server.js Local preview server
 src/cache.js         Redis and memory cache
 src/card-handler.js  Request handling and data enrichment

@@ -301,9 +301,13 @@ function XboxNowPlayingCard({ presence }) {
           duration: sessionDuration,
         })
         : h(
-          Text,
-          { x: textX, y: 107, fill: "#e4e4e7", fontSize: "15", fontWeight: "600" },
-          presence.gamertag || "Xbox Player",
+          GamertagText,
+          {
+            x: textX,
+            y: 107,
+            gamertag: presence.gamertag || "Xbox Player",
+            maxWidth: 190,
+          },
         ),
     ),
 
@@ -344,6 +348,14 @@ function Text({ children, ...props }) {
 }
 
 function GamertagSessionLine({ x, y, gamertag, duration }) {
+  const gamertagText = getDisplayGamertag(gamertag);
+  const gamertagWidth = estimateTextWidth(gamertagText, 15, 0);
+  const maxGamertagWidth = 116;
+  const visibleGamertagWidth = Math.min(gamertagWidth, maxGamertagWidth);
+  const separatorX = x + visibleGamertagWidth + 12;
+  const labelX = separatorX + 14;
+  const valueX = labelX + 52;
+
   return h(
     "g",
     null,
@@ -353,16 +365,18 @@ function GamertagSessionLine({ x, y, gamertag, duration }) {
       fill: "#e4e4e7",
       fontSize: "15",
       fontWeight: "600",
-    }, truncate(gamertag, 16)),
+      textLength: roundSvgNumber(visibleGamertagWidth),
+      lengthAdjust: "spacingAndGlyphs",
+    }, gamertagText),
     h(Text, {
-      x: x + 112,
+      x: roundSvgNumber(separatorX),
       y,
       fill: "#52525b",
       fontSize: "12",
       fontWeight: "800",
     }, "•"),
     h(Text, {
-      x: x + 126,
+      x: roundSvgNumber(labelX),
       y,
       fill: "#737373",
       fontSize: "10",
@@ -370,7 +384,7 @@ function GamertagSessionLine({ x, y, gamertag, duration }) {
       letterSpacing: "0.04em",
     }, "SESSION"),
     h(Text, {
-      x: x + 178,
+      x: roundSvgNumber(valueX),
       y,
       fill: "#8b8b95",
       fontSize: "10",
@@ -378,6 +392,26 @@ function GamertagSessionLine({ x, y, gamertag, duration }) {
       letterSpacing: "0.04em",
     }, formatDurationMinutes(duration.totalSeconds)),
   );
+}
+
+function GamertagText({ x, y, gamertag, maxWidth }) {
+  const gamertagText = getDisplayGamertag(gamertag);
+  const gamertagWidth = estimateTextWidth(gamertagText, 15, 0);
+  const visibleWidth = Math.min(gamertagWidth, maxWidth);
+
+  return h(Text, {
+    x,
+    y,
+    fill: "#e4e4e7",
+    fontSize: "15",
+    fontWeight: "600",
+    textLength: roundSvgNumber(visibleWidth),
+    lengthAdjust: "spacingAndGlyphs",
+  }, gamertagText);
+}
+
+function getDisplayGamertag(gamertag) {
+  return String(gamertag || "Xbox Player").slice(0, 16);
 }
 
 function ActivityDetail({ x, y, duration, detail, compact = false }) {
@@ -597,6 +631,31 @@ function isGameCoverActivity(presence) {
 function truncate(value, maxLength) {
   const text = String(value ?? "");
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}...` : text;
+}
+
+function estimateTextWidth(value, fontSize, letterSpacing = 0) {
+  const text = String(value ?? "");
+  const baseWidth = Array.from(text).reduce((total, character) => {
+    if (/[A-Z0-9#]/.test(character)) {
+      return total + fontSize * 0.64;
+    }
+
+    if (/[il.,'|]/.test(character)) {
+      return total + fontSize * 0.32;
+    }
+
+    if (/\s/.test(character)) {
+      return total + fontSize * 0.34;
+    }
+
+    return total + fontSize * 0.55;
+  }, 0);
+
+  return baseWidth + Math.max(0, text.length - 1) * letterSpacing;
+}
+
+function roundSvgNumber(value) {
+  return Math.round(value * 10) / 10;
 }
 
 function getNowPlayingText(presence) {

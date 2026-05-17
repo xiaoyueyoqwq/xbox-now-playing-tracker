@@ -8,11 +8,8 @@
   "scripts": {
     "dev": "node --watch scripts/dev-server.js",
     "preview": "node scripts/dev-server.js",
-    "vercel:dev": "vercel dev",
+    "vercel:dev": "pnpm dlx vercel dev",
     "start": "node scripts/dev-server.js"
-  },
-  "devDependencies": {
-    "vercel": "^54.0.0"
   },
   "engines": {
     "node": ">=18"

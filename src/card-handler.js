@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { classifyActivity, isGameActivity } from "./activity-classifier.js";
 import { createPresenceCache } from "./cache.js";
 import { getConfig } from "./config.js";
@@ -51,6 +53,17 @@ export async function handleCardRequest(request, response) {
         fetchedAt: new Date().toISOString(),
       }),
       60,
+    );
+    return;
+  }
+
+  if (!useMock && !isAllowedGamertag(gamertag)) {
+    logWarn(`[security] blocked gamertag="${gamertag}" reason=not-allowed`);
+    sendText(
+      response,
+      403,
+      "403 Forbidden\n\nThis deployment only serves its configured Xbox gamertags.\nFork and self-host the project to create your own card:\nhttps://github.com/xiaoyueyoqwq/xbox-now-playing-tracker\n",
+      300,
     );
     return;
   }
@@ -134,10 +147,8 @@ async function loadPresence(gamertag, useMock) {
       status: "Online",
       titleName: "Halo Infinite",
       titleId: "mock-title",
-      titleArtUrl:
-        "https://store-images.s-microsoft.com/image/apps.54721.13727851868390641.c9cc5f66-aff8-406c-af6b-440838730be0.a80b262c-005c-4958-bb83-77411ba3d3b4",
-      titleHeroUrl:
-        "https://store-images.s-microsoft.com/image/apps.64028.14538027815579556.2756e2fc-8675-4868-9ffc-be745706c3c0.1c42c77a-fc5c-4b49-b796-93c124562c1b",
+      titleArtUrl: await readLocalImageDataUri("mock_halo_cover.jpg"),
+      titleHeroUrl: await readLocalImageDataUri("mock_halo_hero.jpg"),
       deviceType: "Scarlett",
       platformName: "Xbox Series X|S",
       activityKind: "game",
@@ -196,6 +207,20 @@ async function loadPresence(gamertag, useMock) {
   return attachPresenceHistory(embeddedPresence);
 }
 
+async function readLocalImageDataUri(filename) {
+  const safeFilename = path.basename(filename);
+  const extension = path.extname(safeFilename).toLowerCase();
+  const contentTypes = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+    ".webp": "image/webp",
+  };
+  const buffer = await readFile(path.join(process.cwd(), "img", safeFilename));
+  return `data:${contentTypes[extension] || "application/octet-stream"};base64,${buffer.toString("base64")}`;
+}
+
 function getRequestUrl(request) {
   const host = request.headers.host ?? "localhost";
   return new URL(request.url ?? "/", `http://${host}`);
@@ -204,7 +229,28 @@ function getRequestUrl(request) {
 function normalizeGamertag(value) {
   return String(value ?? "")
     .trim()
-    .slice(0, 64);
+    .slice(0, 16);
+}
+
+function isAllowedGamertag(gamertag) {
+  const allowed = getAllowedGamertags();
+  if (allowed.size === 0) {
+    return false;
+  }
+
+  return allowed.has(gamertag.toLowerCase());
+}
+
+function getAllowedGamertags() {
+  return new Set(
+    [
+      config.defaultGamertag,
+      ...config.allowedGamertags,
+    ]
+      .map(normalizeGamertag)
+      .filter(Boolean)
+      .map((value) => value.toLowerCase()),
+  );
 }
 
 function applyActivityArtworkOverrides(presence) {
@@ -281,6 +327,10 @@ export async function shutdownCardHandler() {
 }
 
 function logCardResult(source, presence) {
+  if (presence.provider === "mock") {
+    return;
+  }
+
   const parts = [
     "[card]",
     source,
@@ -495,6 +545,16 @@ function getLastSeenKey(presence) {
 function sendSvg(response, statusCode, body, maxAgeSeconds) {
   response.statusCode = statusCode;
   response.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
+  response.setHeader(
+    "Cache-Control",
+    `public, max-age=${maxAgeSeconds}, stale-while-revalidate=${maxAgeSeconds}`,
+  );
+  response.end(body);
+}
+
+function sendText(response, statusCode, body, maxAgeSeconds) {
+  response.statusCode = statusCode;
+  response.setHeader("Content-Type", "text/plain; charset=utf-8");
   response.setHeader(
     "Cache-Control",
     `public, max-age=${maxAgeSeconds}, stale-while-revalidate=${maxAgeSeconds}`,

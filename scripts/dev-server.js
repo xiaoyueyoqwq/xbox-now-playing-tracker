@@ -26,8 +26,14 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (url.pathname === "/" || url.pathname === "/index.html") {
+      sendStaticFile(response, "index.html");
+      logResponse(request, response, startedAt);
+      return;
+    }
+
     if (url.pathname === "/favicon.ico") {
-      sendStaticImage(response, "/img/favicon.ico");
+      sendStaticImage(response, "/img/favicon.svg");
       logResponse(request, response, startedAt);
       return;
     }
@@ -101,6 +107,26 @@ function sendText(response, statusCode, body) {
   response.end(body);
 }
 
+function sendStaticFile(response, pathname) {
+  const filename = path.basename(pathname);
+  const filePath = path.join(process.cwd(), filename);
+  if (!fs.existsSync(filePath)) {
+    sendText(response, 404, "Not found");
+    return;
+  }
+
+  const contentTypes = {
+    ".html": "text/html; charset=utf-8",
+  };
+  const extension = path.extname(filename).toLowerCase();
+
+  response.writeHead(200, {
+    "Content-Type": contentTypes[extension] || "application/octet-stream",
+    "Cache-Control": "no-store",
+  });
+  fs.createReadStream(filePath).pipe(response);
+}
+
 function sendStaticImage(response, pathname) {
   const filename = path.basename(pathname);
   const filePath = path.join(process.cwd(), "img", filename);
@@ -112,8 +138,11 @@ function sendStaticImage(response, pathname) {
   const extension = path.extname(filename).toLowerCase();
   const contentTypes = {
     ".ico": "image/x-icon",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
     ".png": "image/png",
     ".svg": "image/svg+xml; charset=utf-8",
+    ".webp": "image/webp",
   };
 
   response.writeHead(200, {

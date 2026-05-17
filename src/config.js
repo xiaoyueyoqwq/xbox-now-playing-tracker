@@ -16,11 +16,19 @@ export function getConfig(env = process.env) {
     noCache: isEnabled(env.NO_CACHE),
     noImageCache: isEnabled(env.NO_IMAGE_CACHE),
     defaultGamertag: env.DEFAULT_GAMERTAG ?? "",
+    allowedGamertags: parseList(env.ALLOWED_GAMERTAGS),
   };
 }
 
 function isEnabled(value) {
   return ["1", "true", "yes", "on"].includes(String(value ?? "").toLowerCase());
+}
+
+function parseList(value) {
+  return String(value ?? "")
+    .split(/[\n,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function loadDotEnv(path = ".env") {
