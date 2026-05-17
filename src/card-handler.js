@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { classifyActivity, isGameActivity } from "./activity-classifier.js";
+import { applyArtworkPolicy, shouldEmbedAvatarArtwork } from "./artwork-manager.js";
 import { createPresenceCache } from "./cache.js";
 import { getConfig } from "./config.js";
 import { logInfo, logWarn } from "./logger.js";
@@ -43,16 +44,17 @@ export async function handleCardRequest(request, response) {
   const forceRefresh = url.searchParams.get("refresh") === "1";
 
   if (!gamertag) {
+    const presence = await ensureRenderablePresence({
+      gamertag: "Missing gamertag",
+      isOnline: false,
+      status: "Add ?gamertag=...",
+      titleName: "Configuration needed",
+      fetchedAt: new Date().toISOString(),
+    });
     sendSvg(
       response,
       400,
-      renderCard({
-        gamertag: "Missing gamertag",
-        isOnline: false,
-        status: "Add ?gamertag=...",
-        titleName: "Configuration needed",
-        fetchedAt: new Date().toISOString(),
-      }),
+      renderCard(presence),
       60,
     );
     return;
@@ -78,12 +80,13 @@ export async function handleCardRequest(request, response) {
     : await cache.get(cacheKey);
 
   if (cached.status === "fresh") {
-    logCardResult("cache=fresh", cached.value);
+    const presence = await ensureRenderablePresence(cached.value);
+    logCardResult("cache=fresh", presence);
     sendSvg(
       response,
       200,
-      renderCard(cached.value),
-      getResponseMaxAgeSeconds(cached.value),
+      renderCard(presence),
+      getResponseMaxAgeSeconds(presence),
     );
     return;
   }
@@ -106,7 +109,10 @@ export async function handleCardRequest(request, response) {
       logWarn(
         `Stale refresh failed for ${gamertag}; serving stale presence: ${formatError(error)}`,
       );
-      const stalePresence = { ...cached.value, stale: true };
+      const stalePresence = await ensureRenderablePresence({
+        ...cached.value,
+        stale: true,
+      });
       sendSvg(
         response,
         200,
@@ -129,16 +135,17 @@ export async function handleCardRequest(request, response) {
       getResponseMaxAgeSeconds(presence),
     );
   } catch (error) {
+    const presence = await ensureRenderablePresence({
+      gamertag,
+      isOnline: false,
+      status: "Provider unavailable",
+      titleName: "OpenXBL unavailable",
+      fetchedAt: new Date().toISOString(),
+    });
     sendSvg(
       response,
       200,
-      renderCard({
-        gamertag,
-        isOnline: false,
-        status: "Provider unavailable",
-        titleName: "OpenXBL unavailable",
-        fetchedAt: new Date().toISOString(),
-      }),
+      renderCard(presence),
       60,
     );
     logWarn(
@@ -149,7 +156,7 @@ export async function handleCardRequest(request, response) {
 
 async function loadPresence(gamertag, useMock) {
   if (useMock) {
-    return {
+    return applyArtworkPolicy({
       provider: "mock",
       gamertag,
       xuid: "0",
@@ -167,7 +174,7 @@ async function loadPresence(gamertag, useMock) {
       activityReason: "mock-game",
       sessionStartedAt: new Date(Date.now() - 42 * 60 * 1000).toISOString(),
       fetchedAt: new Date().toISOString(),
-    };
+    });
   }
 
   const presence = await provider.getPresenceByGamertag(gamertag);
@@ -212,10 +219,17 @@ async function loadPresence(gamertag, useMock) {
     }),
   };
 
-  const overriddenPresence = applyActivityArtworkOverrides(classifiedPresence);
-  const embeddedPresence = await embedRemoteArtwork(overriddenPresence);
+  const embeddedPresence = await embedPresenceArtwork(classifiedPresence);
 
   return attachPresenceHistory(embeddedPresence);
+}
+
+async function ensureRenderablePresence(presence) {
+  if (presence.coverImageUrl !== undefined && presence.featureImageUrl !== undefined) {
+    return presence;
+  }
+
+  return embedPresenceArtwork(presence);
 }
 
 async function readLocalImageDataUri(filename) {
@@ -264,46 +278,57 @@ function getAllowedGamertags() {
   );
 }
 
-function applyActivityArtworkOverrides(presence) {
-  if (presence.activityReason !== "known-xbox-app") {
-    return presence;
-  }
-
-  return {
-    ...presence,
-    titleArtUrl: "/img/Xbox_Logo_White.svg",
-    titleHeroUrl: "/img/Xbox_bg.png",
-    titleArtSource: "local-xbox-app-override",
-  };
-}
-
 function shouldWarnForTitleArtFailure(classification) {
   return classification.activityKind === "unknown"
     || classification.activityReason === "microsoft-store-games-search";
 }
 
-async function embedRemoteArtwork(presence) {
-  const shouldResolveAvatar = shouldResolveAvatarArtwork(presence);
-  const [titleArtUrl, titleHeroUrl, avatarUrl] = await Promise.all([
-    resolveImageDataUri(presence.titleArtUrl, { width: 256, height: 256 }),
-    resolveImageDataUri(presence.titleHeroUrl, { width: 640, height: 360 }),
-    shouldResolveAvatar
-      ? resolveImageDataUri(presence.avatarUrl, { width: 256, height: 256 })
-      : Promise.resolve(presence.avatarUrl || ""),
-  ]);
-
-  return {
-    ...presence,
+async function embedPresenceArtwork(presence) {
+  const resolvedPresence = applyArtworkPolicy(presence);
+  const shouldResolveAvatar = shouldEmbedAvatarArtwork(resolvedPresence);
+  const resolveArtworkUrl = createArtworkUrlResolver();
+  const [
     titleArtUrl,
     titleHeroUrl,
     avatarUrl,
+    coverImageUrl,
+    featureImageUrl,
+  ] = await Promise.all([
+    resolveArtworkUrl(presence.titleArtUrl, { width: 256, height: 256 }),
+    resolveArtworkUrl(presence.titleHeroUrl, { width: 640, height: 360 }),
+    shouldResolveAvatar
+      ? resolveArtworkUrl(presence.avatarUrl, { width: 256, height: 256 })
+      : Promise.resolve(presence.avatarUrl || ""),
+    resolveArtworkUrl(resolvedPresence.coverImageUrl, { width: 256, height: 256 }),
+    resolveArtworkUrl(resolvedPresence.featureImageUrl, getArtworkSize(resolvedPresence.featureSource)),
+  ]);
+
+  return {
+    ...resolvedPresence,
+    titleArtUrl,
+    titleHeroUrl,
+    avatarUrl,
+    coverImageUrl,
+    featureImageUrl,
   };
 }
 
-function shouldResolveAvatarArtwork(presence) {
-  return !isGameActivity(presence)
-    && !presence.titleArtUrl
-    && Boolean(presence.avatarUrl);
+function createArtworkUrlResolver() {
+  const resolved = new Map();
+  return (url, size) => {
+    const key = JSON.stringify([url || "", size || null]);
+    if (!resolved.has(key)) {
+      resolved.set(key, resolveImageDataUri(url, size));
+    }
+
+    return resolved.get(key);
+  };
+}
+
+function getArtworkSize(source) {
+  return source === "title-art"
+    ? { width: 256, height: 256 }
+    : { width: 640, height: 360 };
 }
 
 async function resolveImageDataUri(url, size) {

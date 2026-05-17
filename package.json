@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "node --watch scripts/dev-server.js",
     "preview": "node scripts/dev-server.js",
+    "test": "node --test",
     "vercel:dev": "pnpm dlx vercel dev",
     "start": "node scripts/dev-server.js"
   },

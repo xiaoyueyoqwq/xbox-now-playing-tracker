@@ -2,17 +2,25 @@ import { readFileSync } from "node:fs";
 import opentype from "opentype.js";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { applyArtworkPolicy } from "./artwork-manager.js";
 
 const WIDTH = 480;
 const HEIGHT = 160;
 const FONT_FAMILY = "XboxCard, Segoe UI, Ubuntu, Cantarell, sans-serif";
 const TEXT_FONTS = loadTextFonts();
-const FEATURE_ART_URL = "/img/Xbox_bg.png";
 const h = React.createElement;
 
 export function renderCard(presence) {
   return `<?xml version="1.0" encoding="UTF-8"?>
-${renderToStaticMarkup(h(XboxNowPlayingCard, { presence }))}`;
+${renderToStaticMarkup(h(XboxNowPlayingCard, { presence: normalizeArtworkForRender(presence) }))}`;
+}
+
+function normalizeArtworkForRender(presence) {
+  if (presence.coverImageUrl !== undefined && presence.featureImageUrl !== undefined) {
+    return presence;
+  }
+
+  return applyArtworkPolicy(presence);
 }
 
 function XboxNowPlayingCard({ presence }) {
@@ -20,7 +28,7 @@ function XboxNowPlayingCard({ presence }) {
   const activityKind = presence.activityKind || "unknown";
   const isGame = activityKind === "game";
   const isPlaying = isOnline && isGame && !!presence.titleName;
-  const featureMode = getFeatureMode(presence);
+  const featureMode = presence.featureMode || "compact";
 
   const title =
     presence.titleName ||
@@ -28,7 +36,7 @@ function XboxNowPlayingCard({ presence }) {
   const platform = presence.platformName || presence.deviceType || "Xbox";
   const lastSeenText = getLastSeenText(presence);
   const lastSeenTitle = presence.lastSeenTitleName || presence.titleName || "";
-  const featureArtUrl = getFeatureArtUrl(presence);
+  const featureArtUrl = presence.featureImageUrl || "";
 
   const statusColor = isOnline ? "#107c10" : "#52525b";
   const glowColor = isOnline ? "#22c55e" : "#52525b";
@@ -47,7 +55,6 @@ function XboxNowPlayingCard({ presence }) {
   }
 
   const sessionDuration = getSessionDuration(presence);
-  const activeDetail = getActiveDetail(presence);
 
   // Layout constants
   const coverSize = 100;
@@ -239,7 +246,7 @@ function XboxNowPlayingCard({ presence }) {
       h(
         "g",
         { filter: "url(#shadow)" },
-        h(TitleArt, { presence, coverX, coverY, coverSize }),
+        h(CoverArt, { presence, coverX, coverY, coverSize }),
       ),
 
       // Outline over the cover art to simulate inner shadow / physical edge
@@ -586,38 +593,11 @@ function getDisplayGamertag(gamertag) {
   return String(gamertag || "Xbox Player").slice(0, 16);
 }
 
-function ActivityDetail({ x, y, duration, detail, compact = false }) {
-  const label = duration ? "SESSION" : detail.label;
-
-  return h(
-    "g",
-    null,
-    h(Text, {
-      x,
-      y,
-      fill: "#737373",
-      fontSize: "10",
-      fontWeight: "800",
-      letterSpacing: compact ? "0.08em" : "0.12em",
-    }, label),
-    duration
-      ? h(SessionTimer, {
-        x: x + (compact ? 52 : 58),
-        y,
-        totalSeconds: duration.totalSeconds,
-      })
-      : h(Text, {
-        x: x + (compact ? 52 : 58),
-        y,
-        fill: "#d4d4d8",
-        fontSize: "13",
-        fontWeight: "700",
-        fontFamily: "Cascadia Mono, SFMono-Regular, Consolas, monospace",
-      }, truncate(detail.value, 24)),
-  );
-}
-
 function FeatureArt({ featureMode, featureArtUrl }) {
+  if (!featureArtUrl) {
+    return null;
+  }
+
   if (featureMode === "compact") {
     return h(
       "g",
@@ -692,40 +672,8 @@ function getLastSeenTitleLength(title) {
   return 6;
 }
 
-function SessionTimer({ x, y, totalSeconds, anchor = "start" }) {
-  const frames = getTimerFrames(totalSeconds);
-
-  return h(
-    "g",
-    null,
-    frames.map((frame, index) => h(
-      Text,
-      {
-        key: frame,
-        x,
-        y,
-        fill: "#d4d4d8",
-        fontSize: "13",
-        fontWeight: "700",
-        fontFamily: "Cascadia Mono, SFMono-Regular, Consolas, monospace",
-        textAnchor: anchor,
-        opacity: index === 0 ? "1" : "0",
-      },
-      frame,
-      h("animate", {
-        attributeName: "opacity",
-        values: getTimerOpacityValues(index, frames.length),
-        keyTimes: getTimerKeyTimes(frames.length),
-        dur: `${frames.length}s`,
-        repeatCount: "indefinite",
-        calcMode: "discrete",
-      }),
-    )),
-  );
-}
-
-function TitleArt({ presence, coverX, coverY, coverSize }) {
-  if (isXboxAppActivity(presence) && presence.titleArtUrl) {
+function CoverArt({ presence, coverX, coverY, coverSize }) {
+  if (presence.coverKind === "logo" && presence.coverImageUrl) {
     const logoSize = coverSize * 0.5;
     const logoOffset = (coverSize - logoSize) / 2;
 
@@ -745,31 +693,19 @@ function TitleArt({ presence, coverX, coverY, coverSize }) {
         y: coverY + logoOffset,
         width: logoSize,
         height: logoSize,
-        href: presence.titleArtUrl,
+        href: presence.coverImageUrl,
         preserveAspectRatio: "xMidYMid meet",
       }),
     );
   }
 
-  if (presence.titleArtUrl) {
+  if (presence.coverImageUrl) {
     return h("image", {
       x: coverX,
       y: coverY,
       width: coverSize,
       height: coverSize,
-      href: presence.titleArtUrl,
-      preserveAspectRatio: "xMidYMid slice",
-      clipPath: "url(#coverClip)",
-    });
-  }
-
-  if (!isGameCoverActivity(presence) && presence.avatarUrl) {
-    return h("image", {
-      x: coverX,
-      y: coverY,
-      width: coverSize,
-      height: coverSize,
-      href: presence.avatarUrl,
+      href: presence.coverImageUrl,
       preserveAspectRatio: "xMidYMid slice",
       clipPath: "url(#coverClip)",
     });
@@ -794,10 +730,6 @@ function TitleArt({ presence, coverX, coverY, coverSize }) {
       color: "#d4d4d8",
     }),
   );
-}
-
-function isGameCoverActivity(presence) {
-  return presence.activityKind === "game" && Boolean(presence.titleName);
 }
 
 function truncate(value, maxLength) {
@@ -830,55 +762,12 @@ function roundSvgNumber(value) {
   return Math.round(value * 10) / 10;
 }
 
-function getNowPlayingText(presence) {
-  return getSessionDuration(presence)?.text || getActivePlatformText(presence);
-}
-
 function getSessionDuration(presence) {
   if (presence.activityKind !== "game" || !presence.titleName) {
     return null;
   }
 
   return formatPlayDuration(presence.sessionStartedAt);
-}
-
-function getActivePlatformText(presence) {
-  return presence.platformName || presence.deviceType
-    ? `Active on ${presence.platformName || presence.deviceType}`
-    : "Active on Xbox";
-}
-
-function getActiveDetail(presence) {
-  const platform = presence.platformName || presence.deviceType || "Xbox";
-  if (presence.activityKind === "game") {
-    return { label: "STATUS", value: getActivePlatformText(presence) };
-  }
-
-  if (presence.activityKind === "app" && presence.titleName) {
-    return { label: "APP", value: truncate(presence.titleName, 20) };
-  }
-
-  if (presence.activityKind === "system") {
-    return { label: "ONLINE", value: platform };
-  }
-
-  return { label: "ACTIVE", value: platform };
-}
-
-function getFeatureArtUrl(presence) {
-  if (isXboxAppActivity(presence)) {
-    return presence.titleHeroUrl || FEATURE_ART_URL;
-  }
-
-  if (getFeatureMode(presence) === "full") {
-    return presence.titleHeroUrl
-      || presence.lastSeenTitleHeroUrl
-      || presence.titleArtUrl
-      || presence.lastSeenTitleArtUrl
-      || FEATURE_ART_URL;
-  }
-
-  return presence.titleArtUrl || FEATURE_ART_URL;
 }
 
 function isXboxAppActivity(presence) {
@@ -900,22 +789,6 @@ function getXboxAppPlatformLabel(presence) {
   }
 
   return presence.platformName || presence.deviceType || "Xbox App";
-}
-
-function getFeatureMode(presence) {
-  if (presence.activityKind === "game" && presence.isOnline && hasGameFeatureArt(presence)) {
-    return "full";
-  }
-
-  if (!presence.isOnline && (presence.lastSeenTitleHeroUrl || presence.lastSeenTitleArtUrl)) {
-    return "full";
-  }
-
-  return "compact";
-}
-
-function hasGameFeatureArt(presence) {
-  return Boolean(presence.titleHeroUrl || presence.titleArtUrl);
 }
 
 function getLastSeenText(presence, now = Date.now()) {
@@ -968,23 +841,4 @@ function formatDurationSeconds(totalSeconds) {
 
 function formatDurationMinutes(totalSeconds) {
   return `${Math.floor(totalSeconds / 60)}M`;
-}
-
-function getTimerFrames(totalSeconds, frameCount = 60) {
-  return Array.from({ length: frameCount }, (_, index) => (
-    formatDurationSeconds(totalSeconds + index)
-  ));
-}
-
-function getTimerOpacityValues(activeIndex, frameCount) {
-  return Array.from({ length: frameCount + 1 }, (_, index) => {
-    const frameIndex = index % frameCount;
-    return frameIndex === activeIndex ? "1" : "0";
-  }).join(";");
-}
-
-function getTimerKeyTimes(frameCount) {
-  return Array.from({ length: frameCount + 1 }, (_, index) => (
-    (index / frameCount).toFixed(6)
-  )).join(";");
 }
