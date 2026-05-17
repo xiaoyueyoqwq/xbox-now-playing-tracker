@@ -408,6 +408,16 @@
             }
 
             @media (max-width: 880px) {
+                html,
+                body {
+                    scrollbar-width: none;
+                    -ms-overflow-style: none;
+                }
+
+                body::-webkit-scrollbar {
+                    display: none;
+                }
+
                 .shell {
                     width: min(100% - 28px, 640px);
                     padding: 18px 0 32px;
