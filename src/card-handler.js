@@ -90,21 +90,31 @@ export async function handleCardRequest(request, response) {
 
   if (cached.status === "stale") {
     logCardResult("cache=stale", cached.value);
-    cache
-      .refresh(cacheKey, () => loadPresence(gamertag, useMock))
-      .catch((error) => {
-        logWarn(
-          `Background refresh failed for ${gamertag}: ${formatError(error)}`,
-        );
-      });
-    const stalePresence = { ...cached.value, stale: true };
-    sendSvg(
-      response,
-      200,
-      renderCard(stalePresence),
-      getResponseMaxAgeSeconds(stalePresence, 60),
-    );
-    return;
+    try {
+      const presence = await cache.refresh(cacheKey, () =>
+        loadPresence(gamertag, useMock),
+      );
+      logCardResult("cache=stale-refresh", presence);
+      sendSvg(
+        response,
+        200,
+        renderCard(presence),
+        getResponseMaxAgeSeconds(presence),
+      );
+      return;
+    } catch (error) {
+      logWarn(
+        `Stale refresh failed for ${gamertag}; serving stale presence: ${formatError(error)}`,
+      );
+      const stalePresence = { ...cached.value, stale: true };
+      sendSvg(
+        response,
+        200,
+        renderCard(stalePresence),
+        getResponseMaxAgeSeconds(stalePresence, 60),
+      );
+      return;
+    }
   }
 
   try {
