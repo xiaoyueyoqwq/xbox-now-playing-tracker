@@ -34,6 +34,7 @@
 - Play sessions are request-observed, not background timers. Continue same-game sessions across short GitHub image proxy/crawler gaps, but reset when the same game has not been observed for more than 30 minutes or when an away/non-game observation exceeds the grace window.
 - Renderer layout differs by kind: confirmed games may use full feature art; app/system/unknown states should use the compact right-corner artwork treatment unless there is a deliberate design change.
 - Artwork source decisions must go through `src/artwork-manager.js`. Do not add new renderer-side fallback chains over `titleArtUrl`, `titleHeroUrl`, or `avatarUrl`; renderer should consume resolved `coverImageUrl`, `coverKind`, `featureImageUrl`, and `featureMode`.
+- Offline last-seen fields can be attached after an initial artwork policy pass. When `lastSeenTitle*` fields are added to a presence object that already has resolved artwork fields, refresh the artwork policy so stale fallback images do not hide the last played game.
 - OpenXBL can return multiple active titles across devices. Title selection should score active game-like titles above app/system titles so Xbox App presence does not hide a currently playing game.
 
 ## Implementation Preferences

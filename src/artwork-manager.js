@@ -19,6 +19,19 @@ export function applyArtworkPolicy(presence) {
   };
 }
 
+export function shouldRefreshArtworkPolicy(presence) {
+  if (presence.coverImageUrl === undefined || presence.featureImageUrl === undefined) {
+    return true;
+  }
+
+  const resolved = applyArtworkPolicy(presence);
+  return presence.artworkPolicy !== resolved.artworkPolicy
+    || presence.coverSource !== resolved.coverSource
+    || presence.coverKind !== resolved.coverKind
+    || presence.featureSource !== resolved.featureSource
+    || presence.featureMode !== resolved.featureMode;
+}
+
 export function resolveArtworkPolicy(presence) {
   if (isXboxAppActivity(presence)) {
     return {

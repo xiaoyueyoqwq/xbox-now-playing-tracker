@@ -1,7 +1,11 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { classifyActivity, isGameActivity } from "./activity-classifier.js";
-import { applyArtworkPolicy, shouldEmbedAvatarArtwork } from "./artwork-manager.js";
+import {
+  applyArtworkPolicy,
+  shouldEmbedAvatarArtwork,
+  shouldRefreshArtworkPolicy,
+} from "./artwork-manager.js";
 import { createPresenceCache } from "./cache.js";
 import { getConfig } from "./config.js";
 import {
@@ -318,7 +322,7 @@ async function getOpenXblPresence(gamertag) {
 }
 
 async function ensureRenderablePresence(presence) {
-  if (presence.coverImageUrl !== undefined && presence.featureImageUrl !== undefined) {
+  if (!shouldRefreshArtworkPolicy(presence)) {
     return presence;
   }
 
@@ -734,7 +738,7 @@ async function attachPresenceHistory(presence) {
     return presence;
   }
 
-  return {
+  return embedPresenceArtwork({
     ...presence,
     lastSeenAt: lastSeen.seenAt,
     lastSeenTitleName: lastSeen.titleName,
@@ -743,7 +747,7 @@ async function attachPresenceHistory(presence) {
     lastSeenTitleHeroUrl: lastSeen.titleHeroUrl,
     lastSeenPlatformName: lastSeen.platformName,
     lastSeenDeviceType: lastSeen.deviceType,
-  };
+  });
 }
 
 async function markCurrentGameSessionAway(

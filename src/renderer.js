@@ -32,6 +32,7 @@ function XboxNowPlayingCard({ presence }) {
 
   const title =
     presence.titleName ||
+    (!isOnline && presence.lastSeenTitleName) ||
     (isOnline ? "Exploring Dashboard" : "Currently Offline");
   const platform = presence.platformName || presence.deviceType || "Xbox";
   const lastSeenText = getLastSeenText(presence);

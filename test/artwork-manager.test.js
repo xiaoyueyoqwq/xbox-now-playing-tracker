@@ -5,6 +5,7 @@ import {
   LOCAL_XBOX_BACKGROUND_URL,
   LOCAL_XBOX_LOGO_URL,
   shouldEmbedAvatarArtwork,
+  shouldRefreshArtworkPolicy,
 } from "../src/artwork-manager.js";
 
 test("active games use title cover and full hero art", () => {
@@ -99,6 +100,33 @@ test("offline cards with last-seen artwork use full last-seen feature art", () =
   assert.equal(presence.featureSource, "last-seen-hero");
   assert.equal(presence.featureImageUrl, "https://example.com/last-hero.jpg");
   assert.equal(presence.featureMode, "full");
+});
+
+test("offline cached fallback artwork refreshes after last-seen artwork is attached", () => {
+  const stalePresence = {
+    isOnline: false,
+    activityKind: "system",
+    activityReason: "offline",
+    avatarUrl: "https://example.com/avatar.png",
+    artworkPolicy: "non-game-activity",
+    coverSource: "avatar",
+    coverKind: "avatar",
+    coverImageUrl: "https://example.com/avatar.png",
+    featureSource: "local-xbox-bg",
+    featureMode: "compact",
+    featureImageUrl: LOCAL_XBOX_BACKGROUND_URL,
+    lastSeenTitleName: "Halo Infinite",
+    lastSeenTitleArtUrl: "https://example.com/last-cover.jpg",
+    lastSeenTitleHeroUrl: "https://example.com/last-hero.jpg",
+  };
+
+  assert.equal(shouldRefreshArtworkPolicy(stalePresence), true);
+
+  const refreshedPresence = applyArtworkPolicy(stalePresence);
+  assert.equal(refreshedPresence.artworkPolicy, "offline-last-seen");
+  assert.equal(refreshedPresence.featureSource, "last-seen-hero");
+  assert.equal(refreshedPresence.featureImageUrl, "https://example.com/last-hero.jpg");
+  assert.equal(refreshedPresence.featureMode, "full");
 });
 
 test("unknown title art stays compact and does not fall through to avatar", () => {

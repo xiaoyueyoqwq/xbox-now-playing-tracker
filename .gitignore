@@ -15,3 +15,5 @@ dist/
 build/
 .cache/
 .turbo/
+.vscode/settings.json
+.vscode/
