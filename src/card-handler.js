@@ -86,7 +86,22 @@ export async function handleCardRequest(request, response) {
   const cacheKey = useMock
     ? `mock:${gamertag}`
     : `openxbl:${gamertag.toLowerCase()}`;
+  const svgCacheKey = getSvgCacheKey(cacheKey);
   const bypassCache = forceRefresh || config.noCache;
+  if (!bypassCache) {
+    const cachedSvg = await cache.getValue(svgCacheKey);
+    if (cachedSvg?.body) {
+      logInfo(`[card] cache=svg gt=${gamertag}`);
+      sendSvg(
+        response,
+        200,
+        cachedSvg.body,
+        cachedSvg.maxAgeSeconds ?? config.cacheTtlSeconds,
+      );
+      return;
+    }
+  }
+
   const cached = bypassCache
     ? { status: "miss", value: null }
     : await cache.get(cacheKey);
@@ -94,11 +109,12 @@ export async function handleCardRequest(request, response) {
   if (cached.status === "fresh") {
     const presence = await ensureRenderablePresence(cached.value);
     logCardResult("cache=fresh", presence);
-    sendSvg(
+    await sendRenderedSvg(
       response,
       200,
-      renderCard(presence),
+      presence,
       getResponseMaxAgeSeconds(presence),
+      svgCacheKey,
     );
     return;
   }
@@ -110,11 +126,12 @@ export async function handleCardRequest(request, response) {
         loadPresence(gamertag, useMock),
       );
       logCardResult("cache=stale-refresh", presence);
-      sendSvg(
+      await sendRenderedSvg(
         response,
         200,
-        renderCard(presence),
+        presence,
         getResponseMaxAgeSeconds(presence),
+        svgCacheKey,
       );
       return;
     } catch (error) {
@@ -125,11 +142,12 @@ export async function handleCardRequest(request, response) {
         ...cached.value,
         stale: true,
       });
-      sendSvg(
+      await sendRenderedSvg(
         response,
         200,
-        renderCard(stalePresence),
+        stalePresence,
         getResponseMaxAgeSeconds(stalePresence, 60),
+        svgCacheKey,
       );
       return;
     }
@@ -140,11 +158,12 @@ export async function handleCardRequest(request, response) {
       loadPresence(gamertag, useMock),
     );
     logCardResult(getCacheSource({ forceRefresh, bypassCache }), presence);
-    sendSvg(
+    await sendRenderedSvg(
       response,
       200,
-      renderCard(presence),
+      presence,
       getResponseMaxAgeSeconds(presence),
+      svgCacheKey,
     );
   } catch (error) {
     const presence = await ensureRenderablePresence({
@@ -180,6 +199,17 @@ export async function refreshAllowedGamertags({ force = true } = {}) {
       const presence = cached.status === "fresh"
         ? await ensureRenderablePresence(cached.value)
         : await cache.refresh(cacheKey, () => loadPresence(gamertag, false));
+
+      const maxAgeSeconds = getResponseMaxAgeSeconds(presence);
+      await cache.setValue(
+        getSvgCacheKey(cacheKey),
+        {
+          body: renderCard(presence),
+          maxAgeSeconds,
+          renderedAt: new Date().toISOString(),
+        },
+        getSvgCacheTtlSeconds(maxAgeSeconds),
+      );
 
       logCardResult(force ? "cron=refresh" : `cron=${cached.status}`, presence);
       results.push({
@@ -563,6 +593,34 @@ function getResponseMaxAgeSeconds(
   }
 
   return fallbackSeconds;
+}
+
+async function sendRenderedSvg(response, statusCode, presence, maxAgeSeconds, svgCacheKey) {
+  const body = renderCard(presence);
+  if (svgCacheKey) {
+    await cache.setValue(
+      svgCacheKey,
+      {
+        body,
+        maxAgeSeconds,
+        renderedAt: new Date().toISOString(),
+      },
+      getSvgCacheTtlSeconds(maxAgeSeconds),
+    );
+  }
+
+  sendSvg(response, statusCode, body, maxAgeSeconds);
+}
+
+function getSvgCacheKey(cacheKey) {
+  return `svg:${cacheKey}`;
+}
+
+function getSvgCacheTtlSeconds(maxAgeSeconds) {
+  return Math.max(
+    config.cacheTtlSeconds,
+    Number(maxAgeSeconds) || config.cacheTtlSeconds,
+  );
 }
 
 function shortImageUrl(url) {
