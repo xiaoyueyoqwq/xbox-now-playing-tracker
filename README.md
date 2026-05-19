@@ -119,7 +119,7 @@ The project uses Redis for more than response caching:
 - Xbox avatar image data URIs.
 - Fully rendered SVG card bodies for fast GitHub camo/profile fetches.
 
-Image data URIs are cached for 12 hours. Presence freshness is controlled by `CACHE_TTL_SECONDS`. Rendered SVG bodies are cached with the same max-age used for the response, so GitHub can fetch a complete card quickly without triggering provider or artwork work. Active game SVG responses use a shorter HTTP cache window so the minute-based session display updates without increasing OpenXBL calls.
+Image data URIs are cached for 12 hours. Presence freshness is controlled by `CACHE_TTL_SECONDS`. Rendered SVG bodies are cached with the same max-age used for the response, so GitHub can fetch a complete card quickly without triggering provider or artwork work. SVG responses also include `s-maxage` for shared edge caches, which helps GitHub camo fetch from Vercel's CDN instead of invoking a Serverless function. Active game SVG responses use a shorter browser cache window so the minute-based session display updates without increasing OpenXBL calls.
 
 Redis is strongly recommended in production. Without Redis, Vercel instance changes can lose session and last-seen state.
 

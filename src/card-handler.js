@@ -39,6 +39,9 @@ const IMAGE_DATA_TTL_SECONDS = 12 * 60 * 60;
 const IMAGE_FETCH_TIMEOUT_MS = 5000;
 const IMAGE_DATA_MAX_BYTES = 600_000;
 const IMAGE_FETCH_ATTEMPTS = 3;
+const SVG_SHARED_CACHE_MIN_SECONDS = 5 * 60;
+const SVG_STALE_IF_ERROR_SECONDS = 24 * 60 * 60;
+const SVG_STALE_REVALIDATE_SECONDS = 24 * 60 * 60;
 const PLAY_SESSION_RESPONSE_TTL_SECONDS = 15;
 const PLAY_SESSION_OBSERVATION_GRACE_MS = 30 * 60 * 1000;
 const XUID_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60;
@@ -919,12 +922,20 @@ function getLastSeenKey(presence) {
 }
 
 function sendSvg(response, statusCode, body, maxAgeSeconds) {
+  const sharedMaxAgeSeconds = getSharedCacheHeaderSeconds(maxAgeSeconds);
+  const sharedCacheControl = [
+    "public",
+    `max-age=${sharedMaxAgeSeconds}`,
+    `stale-while-revalidate=${SVG_STALE_REVALIDATE_SECONDS}`,
+    `stale-if-error=${SVG_STALE_IF_ERROR_SECONDS}`,
+  ].join(", ");
+
   response.statusCode = statusCode;
   response.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
-  response.setHeader(
-    "Cache-Control",
-    `public, max-age=${maxAgeSeconds}, stale-while-revalidate=${maxAgeSeconds}`,
-  );
+  response.setHeader("Content-Length", Buffer.byteLength(body));
+  response.setHeader("Cache-Control", sharedCacheControl);
+  response.setHeader("CDN-Cache-Control", sharedCacheControl);
+  response.setHeader("Vercel-CDN-Cache-Control", sharedCacheControl);
   response.end(body);
 }
 
@@ -936,6 +947,21 @@ function sendText(response, statusCode, body, maxAgeSeconds) {
     `public, max-age=${maxAgeSeconds}, stale-while-revalidate=${maxAgeSeconds}`,
   );
   response.end(body);
+}
+
+function getCacheHeaderSeconds(value) {
+  const seconds = Number(value);
+  return Number.isFinite(seconds) && seconds > 0
+    ? Math.floor(seconds)
+    : config.cacheTtlSeconds;
+}
+
+function getSharedCacheHeaderSeconds(value) {
+  return Math.max(
+    SVG_SHARED_CACHE_MIN_SECONDS,
+    config.cacheTtlSeconds,
+    getCacheHeaderSeconds(value),
+  );
 }
 
 function formatError(error) {
