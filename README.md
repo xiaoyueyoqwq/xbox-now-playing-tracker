@@ -204,11 +204,10 @@ crons = ["*/3 * * * *"]
 In the Worker settings, add:
 
 ```text
-REFRESH_URL=https://your-project.vercel.app/api/cron/refresh
 CRON_SECRET=the-same-value-as-vercel-cron-secret
 ```
 
-Set `CRON_SECRET` as a secret value. `REFRESH_URL` can be a normal variable.
+Set `CRON_SECRET` as a secret value. `REFRESH_URL` is already configured as a normal variable in `workers/presence-refresh/wrangler.toml`; update it there if you deploy under a different domain.
 
 5. Confirm it is working.
 

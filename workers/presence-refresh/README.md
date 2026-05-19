@@ -5,11 +5,10 @@ Cloudflare Worker Cron Trigger for proactive Xbox presence refreshes.
 Configure Worker variables in Cloudflare:
 
 ```text
-REFRESH_URL=https://your-project.vercel.app/api/cron/refresh
 CRON_SECRET=the-same-value-as-vercel-cron-secret
 ```
 
-`CRON_SECRET` should be a secret, not a public variable. The same value must also be configured in Vercel.
+`CRON_SECRET` should be a secret, not a public variable. The same value must also be configured in Vercel. `REFRESH_URL` is configured as a normal variable in `wrangler.toml`; update it there if you deploy under a different domain.
 
 When importing this repository in Cloudflare, use:
 
