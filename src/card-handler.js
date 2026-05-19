@@ -93,9 +93,14 @@ export async function handleCardRequest(request, response) {
   const svgCacheKey = getSvgCacheKey(cacheKey);
   const svgBackupCacheKey = getSvgBackupCacheKey(cacheKey);
   const bypassCache = forceRefresh || config.noCache;
-  if (!bypassCache) {
+  const cached = bypassCache
+    ? { status: "miss", value: null }
+    : await cache.get(cacheKey);
+  const hasSessionTimer = hasVisibleSessionTimer(cached.value);
+
+  if (!bypassCache && !hasSessionTimer) {
     const cachedSvg = await cache.getValue(svgCacheKey);
-    if (cachedSvg?.body) {
+    if (cachedSvg?.body && !isTimerSvgCacheValue(cachedSvg)) {
       logInfo(`[card] cache=svg gt=${gamertag}`);
       sendSvg(
         response,
@@ -107,13 +112,11 @@ export async function handleCardRequest(request, response) {
     }
   }
 
-  const cachedBackupSvg = bypassCache
-    ? null
-    : await cache.getValue(svgBackupCacheKey);
-
-  const cached = bypassCache
-    ? { status: "miss", value: null }
-    : await cache.get(cacheKey);
+  const cachedBackupSvg = await getReusableBackupSvg({
+    bypassCache,
+    hasSessionTimer,
+    svgBackupCacheKey,
+  });
 
   if (cached.status === "fresh") {
     const presence = await ensureRenderablePresence(cached.value);
@@ -123,8 +126,8 @@ export async function handleCardRequest(request, response) {
       200,
       presence,
       getResponseMaxAgeSeconds(presence),
-      svgCacheKey,
-      svgBackupCacheKey,
+      getSvgCacheKeyForPresence(svgCacheKey, presence),
+      getSvgBackupCacheKeyForPresence(svgBackupCacheKey, presence),
     );
     return;
   }
@@ -141,8 +144,8 @@ export async function handleCardRequest(request, response) {
         200,
         presence,
         getResponseMaxAgeSeconds(presence),
-        svgCacheKey,
-        svgBackupCacheKey,
+        getSvgCacheKeyForPresence(svgCacheKey, presence),
+        getSvgBackupCacheKeyForPresence(svgBackupCacheKey, presence),
       );
       return;
     } catch (error) {
@@ -158,8 +161,8 @@ export async function handleCardRequest(request, response) {
         200,
         stalePresence,
         getResponseMaxAgeSeconds(stalePresence, 60),
-        svgCacheKey,
-        svgBackupCacheKey,
+        getSvgCacheKeyForPresence(svgCacheKey, stalePresence),
+        getSvgBackupCacheKeyForPresence(svgBackupCacheKey, stalePresence),
       );
       return;
     }
@@ -175,8 +178,8 @@ export async function handleCardRequest(request, response) {
       200,
       presence,
       getResponseMaxAgeSeconds(presence),
-      svgCacheKey,
-      svgBackupCacheKey,
+      getSvgCacheKeyForPresence(svgCacheKey, presence),
+      getSvgBackupCacheKeyForPresence(svgBackupCacheKey, presence),
     );
   } catch (error) {
     if (cachedBackupSvg?.body) {
@@ -230,8 +233,8 @@ export async function refreshAllowedGamertags({ force = true } = {}) {
       await cacheRenderedSvg({
         body: renderCard(presence),
         maxAgeSeconds,
-        svgCacheKey: getSvgCacheKey(cacheKey),
-        svgBackupCacheKey: getSvgBackupCacheKey(cacheKey),
+        svgCacheKey: getSvgCacheKeyForPresence(getSvgCacheKey(cacheKey), presence),
+        svgBackupCacheKey: getSvgBackupCacheKeyForPresence(getSvgBackupCacheKey(cacheKey), presence),
       });
 
       logCardResult(force ? "cron=refresh" : `cron=${cached.status}`, presence);
@@ -611,11 +614,27 @@ function getResponseMaxAgeSeconds(
   presence,
   fallbackSeconds = config.cacheTtlSeconds,
 ) {
-  if (presence?.isOnline && isGameActivity(presence) && presence.sessionStartedAt) {
+  if (hasVisibleSessionTimer(presence)) {
     return PLAY_SESSION_RESPONSE_TTL_SECONDS;
   }
 
   return fallbackSeconds;
+}
+
+function hasVisibleSessionTimer(presence) {
+  return Boolean(
+    presence?.isOnline
+      && isGameActivity(presence)
+      && presence.sessionStartedAt,
+  );
+}
+
+function getSvgCacheKeyForPresence(svgCacheKey, presence) {
+  return hasVisibleSessionTimer(presence) ? "" : svgCacheKey;
+}
+
+function getSvgBackupCacheKeyForPresence(svgBackupCacheKey, presence) {
+  return hasVisibleSessionTimer(presence) ? "" : svgBackupCacheKey;
 }
 
 async function sendRenderedSvg(
@@ -664,6 +683,26 @@ function getSvgBackupCacheKey(cacheKey) {
 
 function getSvgCacheTtlSeconds(maxAgeSeconds) {
   return getCacheHeaderSeconds(maxAgeSeconds);
+}
+
+async function getReusableBackupSvg({
+  bypassCache,
+  hasSessionTimer,
+  svgBackupCacheKey,
+}) {
+  if (bypassCache || hasSessionTimer) {
+    return null;
+  }
+
+  const cachedBackupSvg = await cache.getValue(svgBackupCacheKey);
+  return isTimerSvgCacheValue(cachedBackupSvg) ? null : cachedBackupSvg;
+}
+
+function isTimerSvgCacheValue(value) {
+  return Boolean(
+    value?.body
+      && getCacheHeaderSeconds(value.maxAgeSeconds) <= PLAY_SESSION_RESPONSE_TTL_SECONDS,
+  );
 }
 
 function shortImageUrl(url) {
@@ -964,13 +1003,21 @@ function getLastSeenKey(presence) {
 function sendSvg(response, statusCode, body, maxAgeSeconds) {
   const clientMaxAgeSeconds = getCacheHeaderSeconds(maxAgeSeconds);
   const sharedMaxAgeSeconds = getSharedCacheHeaderSeconds(clientMaxAgeSeconds);
-  const sharedCacheControl = [
+  const isTimerResponse = clientMaxAgeSeconds <= PLAY_SESSION_RESPONSE_TTL_SECONDS;
+  const cacheControlParts = [
     "public",
     `max-age=${clientMaxAgeSeconds}`,
     `s-maxage=${sharedMaxAgeSeconds}`,
-    `stale-while-revalidate=${SVG_STALE_REVALIDATE_SECONDS}`,
-    `stale-if-error=${SVG_STALE_IF_ERROR_SECONDS}`,
-  ].join(", ");
+  ];
+  if (isTimerResponse) {
+    cacheControlParts.push("must-revalidate");
+  } else {
+    cacheControlParts.push(
+      `stale-while-revalidate=${SVG_STALE_REVALIDATE_SECONDS}`,
+      `stale-if-error=${SVG_STALE_IF_ERROR_SECONDS}`,
+    );
+  }
+  const sharedCacheControl = cacheControlParts.join(", ");
 
   response.statusCode = statusCode;
   response.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
