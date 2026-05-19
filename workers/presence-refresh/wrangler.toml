@@ -1,9 +1,13 @@
 name = "xbox-refresh-cron"
 main = "src/index.js"
 compatibility_date = "2026-05-17"
+keep_vars = true
 
 [vars]
 REFRESH_URL = "https://xbox-tracker.vaiiya.org/api/cron/refresh"
+
+[secrets]
+required = ["CRON_SECRET"]
 
 [triggers]
 crons = ["*/3 * * * *"]
