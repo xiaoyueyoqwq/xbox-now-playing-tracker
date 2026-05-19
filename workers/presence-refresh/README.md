@@ -24,7 +24,7 @@ The schedule is defined in `wrangler.toml`:
 
 ```toml
 [triggers]
-crons = ["*/15 * * * *"]
+crons = ["*/3 * * * *"]
 ```
 
-Cloudflare runs this cron expression and invokes the Worker's `scheduled()` handler. Browser visits invoke `fetch()` instead, so opening the Worker URL does not refresh presence.
+Cloudflare runs this cron expression every 3 minutes and invokes the Worker's `scheduled()` handler. Browser visits invoke `fetch()` instead, so opening the Worker URL does not refresh presence.

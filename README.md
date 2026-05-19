@@ -119,7 +119,7 @@ The project uses Redis for more than response caching:
 - Xbox avatar image data URIs.
 - Fully rendered SVG card bodies for fast GitHub camo/profile fetches.
 
-Image data URIs are cached for 12 hours. Presence freshness is controlled by `CACHE_TTL_SECONDS`. Rendered SVG bodies are cached with the same max-age used for the response, so GitHub can fetch a complete card quickly without triggering provider or artwork work. SVG responses also include `s-maxage` for shared edge caches, which helps GitHub camo fetch from Vercel's CDN instead of invoking a Serverless function. Active game SVG responses keep a short cache window and skip baked SVG caches so the minute-based session display updates without divergent cached timer values. Non-timer cards keep a separate backup SVG for 24 hours so provider failures can return the last complete card instead of a broken image.
+Image data URIs and successful image URL candidates are cached for 7 days. Presence freshness is controlled by `CACHE_TTL_SECONDS`. Rendered SVG bodies are cached with the same max-age used for the response, so GitHub can fetch a complete card quickly without triggering provider or artwork work. SVG responses also include `s-maxage` for shared edge caches, which helps GitHub camo fetch from Vercel's CDN instead of invoking a Serverless function. Active game SVG responses keep a short cache window and skip baked SVG caches so the minute-based session display updates without divergent cached timer values. Non-timer cards keep a separate backup SVG for 24 hours so provider failures can return the last complete card instead of a broken image.
 
 Redis is strongly recommended in production. Without Redis, Vercel instance changes can lose session and last-seen state.
 
@@ -131,7 +131,7 @@ OpenXBL gamertag search can occasionally return no XUID for a valid account. The
 
 ## Optional Cloudflare Scheduled Refresh
 
-GitHub image proxy requests are not guaranteed to arrive on a schedule. For a steadier 15-30 minute observation window without Vercel Pro, deploy the bundled Cloudflare Worker in `workers/presence-refresh/`.
+GitHub image proxy requests are not guaranteed to arrive on a schedule. For a steadier 3 minute observation window without Vercel Pro, deploy the bundled Cloudflare Worker in `workers/presence-refresh/`.
 
 > [!WARNING]
 > Scheduled refresh can spend your OpenXBL quota continuously. Keep `ALLOWED_GAMERTAGS` small, use a long `CRON_SECRET`, and never expose that secret in client-side code or public examples. The Worker is intentionally outbound-only: opening its public URL should return an empty `404`, and only Cloudflare's Cron Trigger should call the Vercel refresh endpoint.
@@ -196,7 +196,7 @@ main = "src/index.js"
 compatibility_date = "2026-05-17"
 
 [triggers]
-crons = ["*/15 * * * *"]
+crons = ["*/3 * * * *"]
 ```
 
 4. Set Worker variables.
