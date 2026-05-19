@@ -35,6 +35,7 @@ const cache = createPresenceCache({
 });
 const PLAY_SESSION_TTL_SECONDS = 36 * 60 * 60;
 const LAST_SEEN_TTL_SECONDS = 30 * 24 * 60 * 60;
+const SVG_BACKUP_TTL_SECONDS = 24 * 60 * 60;
 const IMAGE_DATA_TTL_SECONDS = 12 * 60 * 60;
 const IMAGE_FETCH_TIMEOUT_MS = 5000;
 const IMAGE_DATA_MAX_BYTES = 600_000;
@@ -90,6 +91,7 @@ export async function handleCardRequest(request, response) {
     ? `mock:${gamertag}`
     : `openxbl:${gamertag.toLowerCase()}`;
   const svgCacheKey = getSvgCacheKey(cacheKey);
+  const svgBackupCacheKey = getSvgBackupCacheKey(cacheKey);
   const bypassCache = forceRefresh || config.noCache;
   if (!bypassCache) {
     const cachedSvg = await cache.getValue(svgCacheKey);
@@ -105,6 +107,10 @@ export async function handleCardRequest(request, response) {
     }
   }
 
+  const cachedBackupSvg = bypassCache
+    ? null
+    : await cache.getValue(svgBackupCacheKey);
+
   const cached = bypassCache
     ? { status: "miss", value: null }
     : await cache.get(cacheKey);
@@ -118,6 +124,7 @@ export async function handleCardRequest(request, response) {
       presence,
       getResponseMaxAgeSeconds(presence),
       svgCacheKey,
+      svgBackupCacheKey,
     );
     return;
   }
@@ -135,6 +142,7 @@ export async function handleCardRequest(request, response) {
         presence,
         getResponseMaxAgeSeconds(presence),
         svgCacheKey,
+        svgBackupCacheKey,
       );
       return;
     } catch (error) {
@@ -151,6 +159,7 @@ export async function handleCardRequest(request, response) {
         stalePresence,
         getResponseMaxAgeSeconds(stalePresence, 60),
         svgCacheKey,
+        svgBackupCacheKey,
       );
       return;
     }
@@ -167,8 +176,22 @@ export async function handleCardRequest(request, response) {
       presence,
       getResponseMaxAgeSeconds(presence),
       svgCacheKey,
+      svgBackupCacheKey,
     );
   } catch (error) {
+    if (cachedBackupSvg?.body) {
+      logWarn(
+        `Provider request failed for ${gamertag}; serving backup SVG: ${formatError(error)}`,
+      );
+      sendSvg(
+        response,
+        200,
+        cachedBackupSvg.body,
+        cachedBackupSvg.maxAgeSeconds ?? 60,
+      );
+      return;
+    }
+
     const presence = await ensureRenderablePresence({
       gamertag,
       isOnline: false,
@@ -204,15 +227,12 @@ export async function refreshAllowedGamertags({ force = true } = {}) {
         : await cache.refresh(cacheKey, () => loadPresence(gamertag, false));
 
       const maxAgeSeconds = getResponseMaxAgeSeconds(presence);
-      await cache.setValue(
-        getSvgCacheKey(cacheKey),
-        {
-          body: renderCard(presence),
-          maxAgeSeconds,
-          renderedAt: new Date().toISOString(),
-        },
-        getSvgCacheTtlSeconds(maxAgeSeconds),
-      );
+      await cacheRenderedSvg({
+        body: renderCard(presence),
+        maxAgeSeconds,
+        svgCacheKey: getSvgCacheKey(cacheKey),
+        svgBackupCacheKey: getSvgBackupCacheKey(cacheKey),
+      });
 
       logCardResult(force ? "cron=refresh" : `cron=${cached.status}`, presence);
       results.push({
@@ -598,32 +618,52 @@ function getResponseMaxAgeSeconds(
   return fallbackSeconds;
 }
 
-async function sendRenderedSvg(response, statusCode, presence, maxAgeSeconds, svgCacheKey) {
+async function sendRenderedSvg(
+  response,
+  statusCode,
+  presence,
+  maxAgeSeconds,
+  svgCacheKey,
+  svgBackupCacheKey = "",
+) {
   const body = renderCard(presence);
-  if (svgCacheKey) {
-    await cache.setValue(
-      svgCacheKey,
-      {
-        body,
-        maxAgeSeconds,
-        renderedAt: new Date().toISOString(),
-      },
-      getSvgCacheTtlSeconds(maxAgeSeconds),
-    );
-  }
+  await cacheRenderedSvg({ body, maxAgeSeconds, svgCacheKey, svgBackupCacheKey });
 
   sendSvg(response, statusCode, body, maxAgeSeconds);
+}
+
+async function cacheRenderedSvg({
+  body,
+  maxAgeSeconds,
+  svgCacheKey,
+  svgBackupCacheKey = "",
+}) {
+  if (!svgCacheKey) {
+    return;
+  }
+
+  const value = {
+    body,
+    maxAgeSeconds,
+    renderedAt: new Date().toISOString(),
+  };
+  await cache.setValue(svgCacheKey, value, getSvgCacheTtlSeconds(maxAgeSeconds));
+
+  if (svgBackupCacheKey) {
+    await cache.setValue(svgBackupCacheKey, value, SVG_BACKUP_TTL_SECONDS);
+  }
 }
 
 function getSvgCacheKey(cacheKey) {
   return `svg:${cacheKey}`;
 }
 
+function getSvgBackupCacheKey(cacheKey) {
+  return `svg-backup:${cacheKey}`;
+}
+
 function getSvgCacheTtlSeconds(maxAgeSeconds) {
-  return Math.max(
-    config.cacheTtlSeconds,
-    Number(maxAgeSeconds) || config.cacheTtlSeconds,
-  );
+  return getCacheHeaderSeconds(maxAgeSeconds);
 }
 
 function shortImageUrl(url) {
@@ -922,10 +962,12 @@ function getLastSeenKey(presence) {
 }
 
 function sendSvg(response, statusCode, body, maxAgeSeconds) {
-  const sharedMaxAgeSeconds = getSharedCacheHeaderSeconds(maxAgeSeconds);
+  const clientMaxAgeSeconds = getCacheHeaderSeconds(maxAgeSeconds);
+  const sharedMaxAgeSeconds = getSharedCacheHeaderSeconds(clientMaxAgeSeconds);
   const sharedCacheControl = [
     "public",
-    `max-age=${sharedMaxAgeSeconds}`,
+    `max-age=${clientMaxAgeSeconds}`,
+    `s-maxage=${sharedMaxAgeSeconds}`,
     `stale-while-revalidate=${SVG_STALE_REVALIDATE_SECONDS}`,
     `stale-if-error=${SVG_STALE_IF_ERROR_SECONDS}`,
   ].join(", ");
@@ -957,11 +999,12 @@ function getCacheHeaderSeconds(value) {
 }
 
 function getSharedCacheHeaderSeconds(value) {
-  return Math.max(
-    SVG_SHARED_CACHE_MIN_SECONDS,
-    config.cacheTtlSeconds,
-    getCacheHeaderSeconds(value),
-  );
+  const seconds = getCacheHeaderSeconds(value);
+  if (seconds <= PLAY_SESSION_RESPONSE_TTL_SECONDS) {
+    return seconds;
+  }
+
+  return Math.max(SVG_SHARED_CACHE_MIN_SECONDS, config.cacheTtlSeconds, seconds);
 }
 
 function formatError(error) {
