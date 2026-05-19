@@ -797,7 +797,9 @@ async function sendRenderedSvg(
     cacheRenderedSvg({ body, maxAgeSeconds, svgCacheKey, svgBackupCacheKey }),
   );
 
-  sendSvg(response, statusCode, body, maxAgeSeconds);
+  sendSvg(response, statusCode, body, maxAgeSeconds, {
+    revalidateEveryRequest: hasVisibleSessionTimer(presence),
+  });
   recordPerf(perf, "bytes", Buffer.byteLength(body));
 }
 
@@ -979,48 +981,52 @@ async function attachPresenceHistory(presence, perf = null) {
       deviceType: presence.deviceType || "",
       activityKind: presence.activityKind || "",
     };
-    await timePerf(perf, "lastSeenSet", () =>
-      cache.setValue(lastSeenKey, lastSeen, LAST_SEEN_TTL_SECONDS),
-    );
-
     const sessionKey = getPlaySessionKey(presence);
-    await timePerf(perf, "currentSessionAway", () =>
-      markCurrentGameSessionAway(currentGameSessionKey, now, sessionKey),
-    );
+    const [
+      existingSessionValue,
+    ] = await Promise.all([
+      timePerf(perf, "sessionGet", () => cache.getValue(sessionKey)),
+      timePerf(perf, "lastSeenSet", () =>
+        cache.setValue(lastSeenKey, lastSeen, LAST_SEEN_TTL_SECONDS),
+      ),
+      timePerf(perf, "currentSessionAway", () =>
+        markCurrentGameSessionAway(currentGameSessionKey, now, sessionKey),
+      ),
+    ]);
 
-    const existingSession = normalizePlaySession(
-      await timePerf(perf, "sessionGet", () => cache.getValue(sessionKey)),
-    );
+    const existingSession = normalizePlaySession(existingSessionValue);
     const sessionStartedAt = shouldContinuePlaySession(existingSession, now, {
       graceMs: PLAY_SESSION_RESET_GRACE_MS,
     })
       ? existingSession.startedAt
       : now;
-    await timePerf(perf, "sessionSet", () =>
-      cache.setValue(
-        sessionKey,
-        {
-          startedAt: sessionStartedAt,
-          lastObservedAt: now,
-          titleId: presence.titleId || "",
-          titleName: presence.titleName || "",
-          awayObservedAt: "",
-        },
-        PLAY_SESSION_TTL_SECONDS,
-      ),
-    );
-    await timePerf(perf, "currentSessionSet", () =>
-      cache.setValue(
-        currentGameSessionKey,
-        {
+    await Promise.all([
+      timePerf(perf, "sessionSet", () =>
+        cache.setValue(
           sessionKey,
-          titleId: presence.titleId || "",
-          titleName: presence.titleName || "",
-          awayObservedAt: "",
-        },
-        PLAY_SESSION_TTL_SECONDS,
+          {
+            startedAt: sessionStartedAt,
+            lastObservedAt: now,
+            titleId: presence.titleId || "",
+            titleName: presence.titleName || "",
+            awayObservedAt: "",
+          },
+          PLAY_SESSION_TTL_SECONDS,
+        ),
       ),
-    );
+      timePerf(perf, "currentSessionSet", () =>
+        cache.setValue(
+          currentGameSessionKey,
+          {
+            sessionKey,
+            titleId: presence.titleId || "",
+            titleName: presence.titleName || "",
+            awayObservedAt: "",
+          },
+          PLAY_SESSION_TTL_SECONDS,
+        ),
+      ),
+    ]);
 
     return {
       ...presence,
@@ -1070,25 +1076,30 @@ async function markCurrentGameSessionAway(
   const playSession = normalizePlaySession(
     await cache.getValue(currentSession.sessionKey),
   );
-  if (playSession && !playSession.awayObservedAt) {
-    await cache.setValue(
-      currentSession.sessionKey,
+  const updates = [
+    cache.setValue(
+      currentGameSessionKey,
       {
-        ...playSession,
+        ...currentSession,
         awayObservedAt: now,
       },
       PLAY_SESSION_TTL_SECONDS,
+    ),
+  ];
+  if (playSession && !playSession.awayObservedAt) {
+    updates.push(
+      cache.setValue(
+        currentSession.sessionKey,
+        {
+          ...playSession,
+          awayObservedAt: now,
+        },
+        PLAY_SESSION_TTL_SECONDS,
+      ),
     );
   }
 
-  await cache.setValue(
-    currentGameSessionKey,
-    {
-      ...currentSession,
-      awayObservedAt: now,
-    },
-    PLAY_SESSION_TTL_SECONDS,
-  );
+  await Promise.all(updates);
 }
 
 function getPlaySessionKey(presence) {
@@ -1160,28 +1171,34 @@ function getLastSeenKey(presence) {
   return `last-seen:${playerKey}`;
 }
 
-function sendSvg(response, statusCode, body, maxAgeSeconds) {
+function sendSvg(response, statusCode, body, maxAgeSeconds, {
+  revalidateEveryRequest = false,
+} = {}) {
   const clientMaxAgeSeconds = getCacheHeaderSeconds(maxAgeSeconds);
   const sharedMaxAgeSeconds = getSharedCacheHeaderSeconds(clientMaxAgeSeconds);
-  const isTimerResponse = clientMaxAgeSeconds <= PLAY_SESSION_RESPONSE_TTL_SECONDS;
-  const cacheControlParts = [
-    "public",
-    `max-age=${clientMaxAgeSeconds}`,
-    `s-maxage=${sharedMaxAgeSeconds}`,
-  ];
-  if (isTimerResponse) {
-    cacheControlParts.push("must-revalidate");
-  } else {
-    cacheControlParts.push(
-      `stale-while-revalidate=${SVG_STALE_REVALIDATE_SECONDS}`,
-      `stale-if-error=${SVG_STALE_IF_ERROR_SECONDS}`,
-    );
-  }
-  const sharedCacheControl = cacheControlParts.join(", ");
 
   response.statusCode = statusCode;
   response.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
   response.setHeader("Content-Length", Buffer.byteLength(body));
+
+  if (revalidateEveryRequest) {
+    const revalidateCacheControl = "no-cache, max-age=0, must-revalidate";
+    response.setHeader("Cache-Control", revalidateCacheControl);
+    response.setHeader("CDN-Cache-Control", revalidateCacheControl);
+    response.setHeader("Vercel-CDN-Cache-Control", revalidateCacheControl);
+    response.end(body);
+    return;
+  }
+
+  const cacheControlParts = [
+    "public",
+    `max-age=${clientMaxAgeSeconds}`,
+    `s-maxage=${sharedMaxAgeSeconds}`,
+    `stale-while-revalidate=${SVG_STALE_REVALIDATE_SECONDS}`,
+    `stale-if-error=${SVG_STALE_IF_ERROR_SECONDS}`,
+  ];
+  const sharedCacheControl = cacheControlParts.join(", ");
+
   response.setHeader("Cache-Control", sharedCacheControl);
   response.setHeader("CDN-Cache-Control", sharedCacheControl);
   response.setHeader("Vercel-CDN-Cache-Control", sharedCacheControl);
