@@ -52,6 +52,7 @@ const PLAY_SESSION_RESET_GRACE_MS = Math.max(
 );
 
 export async function handleCardRequest(request, response) {
+  const perf = createPerfTrace("card");
   const url = getRequestUrl(request);
   const gamertag = normalizeGamertag(
     url.searchParams.get("gamertag") || config.defaultGamertag,
@@ -95,11 +96,11 @@ export async function handleCardRequest(request, response) {
   const bypassCache = forceRefresh || config.noCache;
   const cached = bypassCache
     ? { status: "miss", value: null }
-    : await cache.get(cacheKey);
+    : await timePerf(perf, "presenceGet", () => cache.get(cacheKey));
   const hasSessionTimer = hasVisibleSessionTimer(cached.value);
 
   if (!bypassCache && !hasSessionTimer) {
-    const cachedSvg = await cache.getValue(svgCacheKey);
+    const cachedSvg = await timePerf(perf, "svgGet", () => cache.getValue(svgCacheKey));
     if (cachedSvg?.body && !isTimerSvgCacheValue(cachedSvg)) {
       logInfo(`[card] cache=svg gt=${gamertag}`);
       sendSvg(
@@ -108,18 +109,30 @@ export async function handleCardRequest(request, response) {
         cachedSvg.body,
         cachedSvg.maxAgeSeconds ?? config.cacheTtlSeconds,
       );
+      logPerfTrace(perf, {
+        gamertag,
+        source: "svg",
+        cacheStatus: cached.status,
+        online: cached.value?.isOnline,
+        kind: cached.value?.activityKind,
+        bytes: Buffer.byteLength(cachedSvg.body),
+      });
       return;
     }
   }
 
-  const cachedBackupSvg = await getReusableBackupSvg({
-    bypassCache,
-    hasSessionTimer,
-    svgBackupCacheKey,
-  });
+  const cachedBackupSvg = await timePerf(perf, "backupGet", () =>
+    getReusableBackupSvg({
+      bypassCache,
+      hasSessionTimer,
+      svgBackupCacheKey,
+    }),
+  );
 
   if (cached.status === "fresh") {
-    const presence = await ensureRenderablePresence(cached.value);
+    const presence = await timePerf(perf, "ensureRenderable", () =>
+      ensureRenderablePresence(cached.value, perf),
+    );
     logCardResult("cache=fresh", presence);
     await sendRenderedSvg(
       response,
@@ -128,15 +141,23 @@ export async function handleCardRequest(request, response) {
       getResponseMaxAgeSeconds(presence),
       getSvgCacheKeyForPresence(svgCacheKey, presence),
       getSvgBackupCacheKeyForPresence(svgBackupCacheKey, presence),
+      perf,
     );
+    logPerfTrace(perf, {
+      gamertag,
+      source: "fresh",
+      cacheStatus: cached.status,
+      online: presence.isOnline,
+      kind: presence.activityKind,
+    });
     return;
   }
 
   if (cached.status === "stale") {
     logCardResult("cache=stale", cached.value);
     try {
-      const presence = await cache.refresh(cacheKey, () =>
-        loadPresence(gamertag, useMock),
+      const presence = await timePerf(perf, "presenceRefresh", () =>
+        cache.refresh(cacheKey, () => loadPresence(gamertag, useMock, perf)),
       );
       logCardResult("cache=stale-refresh", presence);
       await sendRenderedSvg(
@@ -146,16 +167,26 @@ export async function handleCardRequest(request, response) {
         getResponseMaxAgeSeconds(presence),
         getSvgCacheKeyForPresence(svgCacheKey, presence),
         getSvgBackupCacheKeyForPresence(svgBackupCacheKey, presence),
+        perf,
       );
+      logPerfTrace(perf, {
+        gamertag,
+        source: "stale-refresh",
+        cacheStatus: cached.status,
+        online: presence.isOnline,
+        kind: presence.activityKind,
+      });
       return;
     } catch (error) {
       logWarn(
         `Stale refresh failed for ${gamertag}; serving stale presence: ${formatError(error)}`,
       );
-      const stalePresence = await ensureRenderablePresence({
-        ...cached.value,
-        stale: true,
-      });
+      const stalePresence = await timePerf(perf, "ensureRenderable", () =>
+        ensureRenderablePresence({
+          ...cached.value,
+          stale: true,
+        }, perf),
+      );
       await sendRenderedSvg(
         response,
         200,
@@ -163,14 +194,22 @@ export async function handleCardRequest(request, response) {
         getResponseMaxAgeSeconds(stalePresence, 60),
         getSvgCacheKeyForPresence(svgCacheKey, stalePresence),
         getSvgBackupCacheKeyForPresence(svgBackupCacheKey, stalePresence),
+        perf,
       );
+      logPerfTrace(perf, {
+        gamertag,
+        source: "stale-fallback",
+        cacheStatus: cached.status,
+        online: stalePresence.isOnline,
+        kind: stalePresence.activityKind,
+      });
       return;
     }
   }
 
   try {
-    const presence = await cache.refresh(cacheKey, () =>
-      loadPresence(gamertag, useMock),
+    const presence = await timePerf(perf, "presenceRefresh", () =>
+      cache.refresh(cacheKey, () => loadPresence(gamertag, useMock, perf)),
     );
     logCardResult(getCacheSource({ forceRefresh, bypassCache }), presence);
     await sendRenderedSvg(
@@ -180,7 +219,15 @@ export async function handleCardRequest(request, response) {
       getResponseMaxAgeSeconds(presence),
       getSvgCacheKeyForPresence(svgCacheKey, presence),
       getSvgBackupCacheKeyForPresence(svgBackupCacheKey, presence),
+      perf,
     );
+    logPerfTrace(perf, {
+      gamertag,
+      source: getCacheSource({ forceRefresh, bypassCache }),
+      cacheStatus: cached.status,
+      online: presence.isOnline,
+      kind: presence.activityKind,
+    });
   } catch (error) {
     if (cachedBackupSvg?.body) {
       logWarn(
@@ -192,25 +239,42 @@ export async function handleCardRequest(request, response) {
         cachedBackupSvg.body,
         cachedBackupSvg.maxAgeSeconds ?? 60,
       );
+      logPerfTrace(perf, {
+        gamertag,
+        source: "backup",
+        cacheStatus: cached.status,
+        bytes: Buffer.byteLength(cachedBackupSvg.body),
+      });
       return;
     }
 
-    const presence = await ensureRenderablePresence({
-      gamertag,
-      isOnline: false,
-      status: "Provider unavailable",
-      titleName: "OpenXBL unavailable",
-      fetchedAt: new Date().toISOString(),
-    });
+    const presence = await timePerf(perf, "ensureRenderable", () =>
+      ensureRenderablePresence({
+        gamertag,
+        isOnline: false,
+        status: "Provider unavailable",
+        titleName: "OpenXBL unavailable",
+        fetchedAt: new Date().toISOString(),
+      }, perf),
+    );
+    const body = await timePerf(perf, "render", () => renderCard(presence));
     sendSvg(
       response,
       200,
-      renderCard(presence),
+      body,
       60,
     );
     logWarn(
       `Provider request failed for ${gamertag}: ${formatError(error)}`,
     );
+    logPerfTrace(perf, {
+      gamertag,
+      source: "provider-error",
+      cacheStatus: cached.status,
+      online: presence.isOnline,
+      kind: presence.activityKind,
+      bytes: Buffer.byteLength(body),
+    });
   }
 }
 
@@ -268,8 +332,15 @@ export async function refreshAllowedGamertags({ force = true } = {}) {
   };
 }
 
-async function loadPresence(gamertag, useMock) {
+async function loadPresence(gamertag, useMock, perf = null) {
   if (useMock) {
+    const [
+      titleArtUrl,
+      titleHeroUrl,
+    ] = await timePerf(perf, "mockImages", () => Promise.all([
+      readLocalImageDataUri("mock_halo_cover.jpg"),
+      readLocalImageDataUri("mock_halo_hero.jpg"),
+    ]));
     return applyArtworkPolicy({
       provider: "mock",
       gamertag,
@@ -279,8 +350,8 @@ async function loadPresence(gamertag, useMock) {
       status: "Online",
       titleName: "Halo Infinite",
       titleId: "mock-title",
-      titleArtUrl: await readLocalImageDataUri("mock_halo_cover.jpg"),
-      titleHeroUrl: await readLocalImageDataUri("mock_halo_hero.jpg"),
+      titleArtUrl,
+      titleHeroUrl,
       deviceType: "Scarlett",
       platformName: "Xbox Series X|S",
       activityKind: "game",
@@ -291,24 +362,26 @@ async function loadPresence(gamertag, useMock) {
     });
   }
 
-  const presence = await getOpenXblPresence(gamertag);
+  const presence = await timePerf(perf, "openxbl", () => getOpenXblPresence(gamertag, perf));
   const localClassification = classifyActivity({
     titleId: presence.titleId,
     titleName: presence.titleName,
   });
   const shouldLookupTitleArt = localClassification.activityReason !== "known-xbox-app";
   const art = shouldLookupTitleArt
-    ? await getTitleArt({
-      titleId: presence.titleId,
-      titleName: presence.titleName,
-    }).catch((error) => {
-      if (shouldWarnForTitleArtFailure(localClassification)) {
-        logWarn(
-          `Title art lookup failed for ${presence.titleName || presence.titleId}: ${formatError(error)}`,
-        );
-      }
-      return null;
-    })
+    ? await timePerf(perf, "titleArt", () =>
+      getTitleArt({
+        titleId: presence.titleId,
+        titleName: presence.titleName,
+      }).catch((error) => {
+        if (shouldWarnForTitleArtFailure(localClassification)) {
+          logWarn(
+            `Title art lookup failed for ${presence.titleName || presence.titleId}: ${formatError(error)}`,
+          );
+        }
+        return null;
+      }),
+    )
     : null;
 
   const enrichedPresence = {
@@ -333,21 +406,25 @@ async function loadPresence(gamertag, useMock) {
     }),
   };
 
-  const embeddedPresence = await embedPresenceArtwork(classifiedPresence);
+  const embeddedPresence = await timePerf(perf, "embedArtwork", () =>
+    embedPresenceArtwork(classifiedPresence),
+  );
 
-  return attachPresenceHistory(embeddedPresence);
+  return timePerf(perf, "history", () => attachPresenceHistory(embeddedPresence, perf));
 }
 
-async function getOpenXblPresence(gamertag) {
+async function getOpenXblPresence(gamertag, perf = null) {
   const xuidCacheKey = getXuidCacheKey(gamertag);
-  const cachedIdentity = await cache.getValue(xuidCacheKey);
+  const cachedIdentity = await timePerf(perf, "xuidGet", () => cache.getValue(xuidCacheKey));
   if (cachedIdentity?.xuid) {
     try {
-      const presence = await provider.getPresenceByXuid({
-        gamertag,
-        xuid: cachedIdentity.xuid,
-        profile: cachedIdentity.profile || null,
-      });
+      const presence = await timePerf(perf, "xuidPresence", () =>
+        provider.getPresenceByXuid({
+          gamertag,
+          xuid: cachedIdentity.xuid,
+          profile: cachedIdentity.profile || null,
+        }),
+      );
       return presence;
     } catch (error) {
       logWarn(
@@ -356,33 +433,37 @@ async function getOpenXblPresence(gamertag) {
     }
   }
 
-  const presence = await provider.getPresenceByGamertag(gamertag);
+  const presence = await timePerf(perf, "gamertagPresence", () =>
+    provider.getPresenceByGamertag(gamertag),
+  );
   if (presence.xuid) {
-    await cache.setValue(
-      xuidCacheKey,
-      {
-        xuid: presence.xuid,
-        profile: {
-          id: presence.xuid,
-          settings: [
-            { id: "Gamertag", value: presence.gamertag || gamertag },
-            { id: "GameDisplayPicRaw", value: presence.avatarUrl || "" },
-          ],
+    await timePerf(perf, "xuidSet", () =>
+      cache.setValue(
+        xuidCacheKey,
+        {
+          xuid: presence.xuid,
+          profile: {
+            id: presence.xuid,
+            settings: [
+              { id: "Gamertag", value: presence.gamertag || gamertag },
+              { id: "GameDisplayPicRaw", value: presence.avatarUrl || "" },
+            ],
+          },
         },
-      },
-      XUID_CACHE_TTL_SECONDS,
+        XUID_CACHE_TTL_SECONDS,
+      ),
     );
   }
 
   return presence;
 }
 
-async function ensureRenderablePresence(presence) {
+async function ensureRenderablePresence(presence, perf = null) {
   if (!shouldRefreshArtworkPolicy(presence)) {
     return presence;
   }
 
-  return embedPresenceArtwork(presence);
+  return timePerf(perf, "embedArtwork", () => embedPresenceArtwork(presence));
 }
 
 async function readLocalImageDataUri(filename) {
@@ -598,6 +679,71 @@ function logCardResult(source, presence) {
   logInfo(parts.join(" "));
 }
 
+function createPerfTrace(name) {
+  return {
+    name,
+    startedAt: Date.now(),
+    marks: new Map(),
+  };
+}
+
+async function timePerf(trace, name, action) {
+  if (!trace) {
+    return action();
+  }
+
+  const startedAt = Date.now();
+  try {
+    return await action();
+  } finally {
+    addPerf(trace, name, Date.now() - startedAt);
+  }
+}
+
+function addPerf(trace, name, elapsedMs) {
+  if (!trace) {
+    return;
+  }
+
+  trace.marks.set(name, (trace.marks.get(name) || 0) + elapsedMs);
+}
+
+function recordPerf(trace, name, value) {
+  if (!trace) {
+    return;
+  }
+
+  trace.marks.set(name, value);
+}
+
+function logPerfTrace(trace, details = {}) {
+  if (!trace) {
+    return;
+  }
+
+  const totalMs = Date.now() - trace.startedAt;
+  const parts = [
+    "[perf]",
+    trace.name,
+    details.gamertag ? `gt=${details.gamertag}` : "",
+    details.source ? `source=${details.source}` : "",
+    details.cacheStatus ? `presence=${details.cacheStatus}` : "",
+    details.online === undefined ? "" : `online=${details.online ? "yes" : "no"}`,
+    details.kind ? `kind=${details.kind}` : "",
+    `total=${totalMs}`,
+  ];
+
+  for (const [name, value] of trace.marks.entries()) {
+    parts.push(`${name}=${value}`);
+  }
+
+  if (details.bytes !== undefined) {
+    parts.push(`bytes=${details.bytes}`);
+  }
+
+  logInfo(parts.filter(Boolean).join(" "));
+}
+
 function getCacheSource({ forceRefresh, bypassCache }) {
   if (forceRefresh) {
     return "cache=refresh";
@@ -644,11 +790,15 @@ async function sendRenderedSvg(
   maxAgeSeconds,
   svgCacheKey,
   svgBackupCacheKey = "",
+  perf = null,
 ) {
-  const body = renderCard(presence);
-  await cacheRenderedSvg({ body, maxAgeSeconds, svgCacheKey, svgBackupCacheKey });
+  const body = await timePerf(perf, "render", () => renderCard(presence));
+  await timePerf(perf, "svgCacheSet", () =>
+    cacheRenderedSvg({ body, maxAgeSeconds, svgCacheKey, svgBackupCacheKey }),
+  );
 
   sendSvg(response, statusCode, body, maxAgeSeconds);
+  recordPerf(perf, "bytes", Buffer.byteLength(body));
 }
 
 async function cacheRenderedSvg({
@@ -807,7 +957,7 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function attachPresenceHistory(presence) {
+async function attachPresenceHistory(presence, perf = null) {
   const lastSeenKey = getLastSeenKey(presence);
   const currentGameSessionKey = getCurrentGameSessionKey(presence);
 
@@ -829,37 +979,47 @@ async function attachPresenceHistory(presence) {
       deviceType: presence.deviceType || "",
       activityKind: presence.activityKind || "",
     };
-    await cache.setValue(lastSeenKey, lastSeen, LAST_SEEN_TTL_SECONDS);
+    await timePerf(perf, "lastSeenSet", () =>
+      cache.setValue(lastSeenKey, lastSeen, LAST_SEEN_TTL_SECONDS),
+    );
 
     const sessionKey = getPlaySessionKey(presence);
-    await markCurrentGameSessionAway(currentGameSessionKey, now, sessionKey);
+    await timePerf(perf, "currentSessionAway", () =>
+      markCurrentGameSessionAway(currentGameSessionKey, now, sessionKey),
+    );
 
-    const existingSession = normalizePlaySession(await cache.getValue(sessionKey));
+    const existingSession = normalizePlaySession(
+      await timePerf(perf, "sessionGet", () => cache.getValue(sessionKey)),
+    );
     const sessionStartedAt = shouldContinuePlaySession(existingSession, now, {
       graceMs: PLAY_SESSION_RESET_GRACE_MS,
     })
       ? existingSession.startedAt
       : now;
-    await cache.setValue(
-      sessionKey,
-      {
-        startedAt: sessionStartedAt,
-        lastObservedAt: now,
-        titleId: presence.titleId || "",
-        titleName: presence.titleName || "",
-        awayObservedAt: "",
-      },
-      PLAY_SESSION_TTL_SECONDS,
-    );
-    await cache.setValue(
-      currentGameSessionKey,
-      {
+    await timePerf(perf, "sessionSet", () =>
+      cache.setValue(
         sessionKey,
-        titleId: presence.titleId || "",
-        titleName: presence.titleName || "",
-        awayObservedAt: "",
-      },
-      PLAY_SESSION_TTL_SECONDS,
+        {
+          startedAt: sessionStartedAt,
+          lastObservedAt: now,
+          titleId: presence.titleId || "",
+          titleName: presence.titleName || "",
+          awayObservedAt: "",
+        },
+        PLAY_SESSION_TTL_SECONDS,
+      ),
+    );
+    await timePerf(perf, "currentSessionSet", () =>
+      cache.setValue(
+        currentGameSessionKey,
+        {
+          sessionKey,
+          titleId: presence.titleId || "",
+          titleName: presence.titleName || "",
+          awayObservedAt: "",
+        },
+        PLAY_SESSION_TTL_SECONDS,
+      ),
     );
 
     return {
@@ -873,7 +1033,7 @@ async function attachPresenceHistory(presence) {
     new Date().toISOString(),
   );
 
-  const lastSeen = await cache.getValue(lastSeenKey);
+  const lastSeen = await timePerf(perf, "lastSeenGet", () => cache.getValue(lastSeenKey));
   if (!lastSeen) {
     return presence;
   }
