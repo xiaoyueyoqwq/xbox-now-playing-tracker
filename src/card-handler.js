@@ -730,6 +730,8 @@ function logPerfTrace(trace, details = {}) {
     details.cacheStatus ? `presence=${details.cacheStatus}` : "",
     details.online === undefined ? "" : `online=${details.online ? "yes" : "no"}`,
     details.kind ? `kind=${details.kind}` : "",
+    `region=${process.env.VERCEL_REGION ?? "unknown"}`,
+    `cacheType=${cache?.primary ? cache.primary.constructor.name : cache?.constructor?.name ?? "unknown"}`,
     `total=${totalMs}`,
   ];
 

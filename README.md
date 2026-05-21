@@ -76,17 +76,17 @@ https://your-project.vercel.app/api/card?gamertag=YourGamertag
 
 Do not deploy the Serverless Function to `hkg1` or `sin1`.
 
-OpenXBL/API traffic from those regions has been observed returning `403` responses. Prefer a US or other non-blocked region. If you pin regions in Vercel, avoid Hong Kong and Singapore.
+OpenXBL/API traffic from those regions has been observed returning `403` responses. Prefer a region close to your Redis database while avoiding Hong Kong and Singapore.
 
-This repository sets Vercel's default region to `iad1` in `vercel.json`:
+This repository sets Vercel's default region to `hnd1` in `vercel.json`, matching a Redis database in AWS `ap-northeast-1`:
 
 ```json
 {
-  "regions": ["iad1"]
+  "regions": ["hnd1"]
 }
 ```
 
-You can change it to another non-blocked region if latency is better for your audience, but keep `hkg1` and `sin1` out of the list.
+You can change it to another non-blocked region if your Redis database is elsewhere, but keep `hkg1` and `sin1` out of the list.
 
 ## Environment Variables
 
