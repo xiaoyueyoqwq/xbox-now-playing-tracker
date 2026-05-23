@@ -16,7 +16,10 @@ ${renderToStaticMarkup(h(XboxNowPlayingCard, { presence: normalizeArtworkForRend
 }
 
 function normalizeArtworkForRender(presence) {
-  if (presence.coverImageUrl !== undefined && presence.featureImageUrl !== undefined) {
+  if (
+    presence.coverImageUrl !== undefined &&
+    presence.featureImageUrl !== undefined
+  ) {
     return presence;
   }
 
@@ -95,7 +98,11 @@ function XboxNowPlayingCard({ presence }) {
         },
         h("stop", { offset: "0", stopColor: "#ffffff", stopOpacity: "0" }),
         h("stop", { offset: "0.34", stopColor: "#ffffff", stopOpacity: "0" }),
-        h("stop", { offset: "0.74", stopColor: "#ffffff", stopOpacity: "0.44" }),
+        h("stop", {
+          offset: "0.74",
+          stopColor: "#ffffff",
+          stopOpacity: "0.44",
+        }),
         h("stop", { offset: "1", stopColor: "#ffffff", stopOpacity: "0.78" }),
       ),
       h(
@@ -187,7 +194,11 @@ function XboxNowPlayingCard({ presence }) {
           gradientUnits: "userSpaceOnUse",
         },
         h("stop", { offset: "0", stopColor: "#ffffff", stopOpacity: "0.78" }),
-        h("stop", { offset: "0.54", stopColor: "#ffffff", stopOpacity: "0.54" }),
+        h("stop", {
+          offset: "0.54",
+          stopColor: "#ffffff",
+          stopOpacity: "0.54",
+        }),
         h("stop", { offset: "0.78", stopColor: "#ffffff", stopOpacity: "0.2" }),
         h("stop", { offset: "1", stopColor: "#ffffff", stopOpacity: "0" }),
       ),
@@ -240,7 +251,7 @@ function XboxNowPlayingCard({ presence }) {
         r: "45",
         fill: glowColor,
         filter: "url(#ambientGlow)",
-        opacity: isXboxAppActivity(presence) ? "0" : (isOnline ? "0.25" : "0.1"),
+        opacity: isXboxAppActivity(presence) ? "0" : isOnline ? "0.25" : "0.1",
       }),
 
       // Game Art
@@ -271,23 +282,23 @@ function XboxNowPlayingCard({ presence }) {
 
       isOnline
         ? h(
-          Text,
-          {
-            x: isPlaying ? textX + 22 : textX + 16,
-            y: 52,
-            fill: "#a1a1aa",
-            fontSize: "11",
-            fontWeight: "700",
-            letterSpacing: "0.1em",
-          },
-          statusText,
-        )
+            Text,
+            {
+              x: isPlaying ? textX + 22 : textX + 16,
+              y: 52,
+              fill: "#a1a1aa",
+              fontSize: "11",
+              fontWeight: "700",
+              letterSpacing: "0.1em",
+            },
+            statusText,
+          )
         : h(LastSeenLine, {
-          x: textX + 16,
-          y: 52,
-          when: statusText,
-          title: lastSeenTitle,
-        }),
+            x: textX + 16,
+            y: 52,
+            when: statusText,
+            title: lastSeenTitle,
+          }),
 
       // Game Title
       h(
@@ -306,22 +317,18 @@ function XboxNowPlayingCard({ presence }) {
       // Gamertag
       isOnline && sessionDuration
         ? h(GamertagSessionLine, {
-          x: textX,
-          y: 107,
-          gamertag: presence.gamertag || "Xbox Player",
-          duration: sessionDuration,
-        })
-        : h(
-          GamertagText,
-          {
+            x: textX,
+            y: 107,
+            gamertag: presence.gamertag || "Xbox Player",
+            duration: sessionDuration,
+          })
+        : h(GamertagText, {
             x: textX,
             y: 107,
             gamertag: presence.gamertag || "Xbox Player",
             maxWidth: 190,
-          },
-        ),
+          }),
     ),
-
   );
 }
 
@@ -367,17 +374,24 @@ function Text({ children, ...props }) {
 function loadTextFonts() {
   try {
     return {
-      regular: parseFontFile("../fonts/Selawik-Regular.ttf"),
-      semiBold: parseFontFile("../fonts/Selawik-SemiBold.ttf"),
-      bold: parseFontFile("../fonts/Selawik-Bold.ttf"),
+      regular: parseFontFile(
+        new URL("../fonts/Selawik-Regular.ttf", import.meta.url),
+      ),
+      semiBold: parseFontFile(
+        new URL("../fonts/Selawik-SemiBold.ttf", import.meta.url),
+      ),
+      bold: parseFontFile(
+        new URL("../fonts/Selawik-Bold.ttf", import.meta.url),
+      ),
     };
-  } catch {
+  } catch (error) {
+    console.error("[renderer] Failed to load text fonts:", error);
     return null;
   }
 }
 
-function parseFontFile(filename) {
-  const buffer = readFileSync(new URL(filename, import.meta.url));
+function parseFontFile(url) {
+  const buffer = readFileSync(url);
   const arrayBuffer = buffer.buffer.slice(
     buffer.byteOffset,
     buffer.byteOffset + buffer.byteLength,
@@ -436,21 +450,34 @@ function createTextPath(text, props) {
 
   const naturalWidth = getPathTextWidth(font, text, size, spacing);
   const targetWidth = Number.parseFloat(textLength);
-  const scaleX = Number.isFinite(targetWidth)
-    && targetWidth > 0
-    && naturalWidth > 0
-    && lengthAdjust === "spacingAndGlyphs"
+  const scaleX =
+    Number.isFinite(targetWidth) &&
+    targetWidth > 0 &&
+    naturalWidth > 0 &&
+    lengthAdjust === "spacingAndGlyphs"
       ? targetWidth / naturalWidth
       : 1;
-  const anchoredX = getAnchoredTextX(xNumber, naturalWidth * scaleX, textAnchor);
-  const pathData = getTextPathData(font, text, anchoredX, yNumber, size, spacing);
+  const anchoredX = getAnchoredTextX(
+    xNumber,
+    naturalWidth * scaleX,
+    textAnchor,
+  );
+  const pathData = getTextPathData(
+    font,
+    text,
+    anchoredX,
+    yNumber,
+    size,
+    spacing,
+  );
   if (!pathData) {
     return null;
   }
 
-  const transform = scaleX === 1
-    ? restProps.transform
-    : `${restProps.transform ? `${restProps.transform} ` : ""}translate(${roundSvgNumber(anchoredX)} 0) scale(${roundSvgNumber(scaleX)} 1) translate(${-roundSvgNumber(anchoredX)} 0)`;
+  const transform =
+    scaleX === 1
+      ? restProps.transform
+      : `${restProps.transform ? `${restProps.transform} ` : ""}translate(${roundSvgNumber(anchoredX)} 0) scale(${roundSvgNumber(scaleX)} 1) translate(${-roundSvgNumber(anchoredX)} 0)`;
 
   return h("path", {
     ...restProps,
@@ -461,7 +488,11 @@ function createTextPath(text, props) {
 }
 
 function getPathFont(fontWeight, fontFamily) {
-  if (String(fontFamily || "").toLowerCase().includes("mono")) {
+  if (
+    String(fontFamily || "")
+      .toLowerCase()
+      .includes("mono")
+  ) {
     return null;
   }
 
@@ -493,8 +524,10 @@ function parseLetterSpacing(value, fontSize) {
 }
 
 function getPathTextWidth(font, text, fontSize, letterSpacing) {
-  return font.getAdvanceWidth(text, fontSize)
-    + Math.max(0, Array.from(text).length - 1) * letterSpacing;
+  return (
+    font.getAdvanceWidth(text, fontSize) +
+    Math.max(0, Array.from(text).length - 1) * letterSpacing
+  );
 }
 
 function getAnchoredTextX(x, width, textAnchor) {
@@ -518,13 +551,15 @@ function getTextPathData(font, text, x, y, fontSize, letterSpacing) {
   }
 
   let cursorX = x;
-  return Array.from(text).map((character) => {
-    const pathData = font
-      .getPath(character, cursorX, y, fontSize)
-      .toPathData({ decimalPlaces: 2, flipY: false });
-    cursorX += font.getAdvanceWidth(character, fontSize) + letterSpacing;
-    return pathData;
-  }).join("");
+  return Array.from(text)
+    .map((character) => {
+      const pathData = font
+        .getPath(character, cursorX, y, fontSize)
+        .toPathData({ decimalPlaces: 2, flipY: false });
+      cursorX += font.getAdvanceWidth(character, fontSize) + letterSpacing;
+      return pathData;
+    })
+    .join("");
 }
 
 function GamertagSessionLine({ x, y, gamertag, duration }) {
@@ -539,38 +574,54 @@ function GamertagSessionLine({ x, y, gamertag, duration }) {
   return h(
     "g",
     null,
-    h(Text, {
-      x,
-      y,
-      fill: "#e4e4e7",
-      fontSize: "15",
-      fontWeight: "600",
-      textLength: roundSvgNumber(visibleGamertagWidth),
-      lengthAdjust: "spacingAndGlyphs",
-    }, gamertagText),
-    h(Text, {
-      x: roundSvgNumber(separatorX),
-      y,
-      fill: "#52525b",
-      fontSize: "12",
-      fontWeight: "800",
-    }, "•"),
-    h(Text, {
-      x: roundSvgNumber(labelX),
-      y,
-      fill: "#737373",
-      fontSize: "10",
-      fontWeight: "800",
-      letterSpacing: "0.04em",
-    }, "SESSION"),
-    h(Text, {
-      x: roundSvgNumber(valueX),
-      y,
-      fill: "#8b8b95",
-      fontSize: "10",
-      fontWeight: "800",
-      letterSpacing: "0.04em",
-    }, formatDurationMinutes(duration.totalSeconds)),
+    h(
+      Text,
+      {
+        x,
+        y,
+        fill: "#e4e4e7",
+        fontSize: "15",
+        fontWeight: "600",
+        textLength: roundSvgNumber(visibleGamertagWidth),
+        lengthAdjust: "spacingAndGlyphs",
+      },
+      gamertagText,
+    ),
+    h(
+      Text,
+      {
+        x: roundSvgNumber(separatorX),
+        y,
+        fill: "#52525b",
+        fontSize: "12",
+        fontWeight: "800",
+      },
+      "•",
+    ),
+    h(
+      Text,
+      {
+        x: roundSvgNumber(labelX),
+        y,
+        fill: "#737373",
+        fontSize: "10",
+        fontWeight: "800",
+        letterSpacing: "0.04em",
+      },
+      "SESSION",
+    ),
+    h(
+      Text,
+      {
+        x: roundSvgNumber(valueX),
+        y,
+        fill: "#8b8b95",
+        fontSize: "10",
+        fontWeight: "800",
+        letterSpacing: "0.04em",
+      },
+      formatDurationMinutes(duration.totalSeconds),
+    ),
   );
 }
 
@@ -579,15 +630,19 @@ function GamertagText({ x, y, gamertag, maxWidth }) {
   const gamertagWidth = estimateTextWidth(gamertagText, 15, 0);
   const visibleWidth = Math.min(gamertagWidth, maxWidth);
 
-  return h(Text, {
-    x,
-    y,
-    fill: "#e4e4e7",
-    fontSize: "15",
-    fontWeight: "600",
-    textLength: roundSvgNumber(visibleWidth),
-    lengthAdjust: "spacingAndGlyphs",
-  }, gamertagText);
+  return h(
+    Text,
+    {
+      x,
+      y,
+      fill: "#e4e4e7",
+      fontSize: "15",
+      fontWeight: "600",
+      textLength: roundSvgNumber(visibleWidth),
+      lengthAdjust: "spacingAndGlyphs",
+    },
+    gamertagText,
+  );
 }
 
 function getDisplayGamertag(gamertag) {
@@ -602,7 +657,10 @@ function FeatureArt({ featureMode, featureArtUrl }) {
   if (featureMode === "compact") {
     return h(
       "g",
-      { clipPath: "url(#compactFeatureClip)", mask: "url(#compactFeatureMask)" },
+      {
+        clipPath: "url(#compactFeatureClip)",
+        mask: "url(#compactFeatureMask)",
+      },
       h("image", {
         x: "356",
         y: "-10",
@@ -776,7 +834,9 @@ function isXboxAppActivity(presence) {
 }
 
 function getXboxAppPlatformLabel(presence) {
-  const value = String(presence.platformName || presence.deviceType || "").toLowerCase();
+  const value = String(
+    presence.platformName || presence.deviceType || "",
+  ).toLowerCase();
   if (value.includes("android")) {
     return "Android";
   }
@@ -785,7 +845,11 @@ function getXboxAppPlatformLabel(presence) {
     return "iOS";
   }
 
-  if (value.includes("pc") || value.includes("win32") || value.includes("windows")) {
+  if (
+    value.includes("pc") ||
+    value.includes("win32") ||
+    value.includes("windows")
+  ) {
     return "PC";
   }
 

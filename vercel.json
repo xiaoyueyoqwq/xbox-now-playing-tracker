@@ -1,7 +1,10 @@
 {
-  "regions": [
-    "hnd1"
-  ],
+  "regions": ["hnd1"],
+  "functions": {
+    "api/card.js": {
+      "includeFiles": "fonts/**"
+    }
+  },
   "headers": [
     {
       "source": "/api/card",
