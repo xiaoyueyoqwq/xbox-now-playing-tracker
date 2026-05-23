@@ -40,9 +40,10 @@ const IMAGE_DATA_TTL_SECONDS = 7 * 24 * 60 * 60;
 const IMAGE_FETCH_TIMEOUT_MS = 5000;
 const IMAGE_DATA_MAX_BYTES = 600_000;
 const IMAGE_FETCH_ATTEMPTS = 3;
-const SVG_SHARED_CACHE_MIN_SECONDS = 5 * 60;
+const NON_TIMER_RESPONSE_TTL_SECONDS = 30;
+const SVG_SHARED_CACHE_MIN_SECONDS = 30;
 const SVG_STALE_IF_ERROR_SECONDS = 24 * 60 * 60;
-const SVG_STALE_REVALIDATE_SECONDS = 24 * 60 * 60;
+const SVG_STALE_REVALIDATE_SECONDS = 30;
 const PLAY_SESSION_RESPONSE_TTL_SECONDS = 15;
 const PLAY_SESSION_OBSERVATION_GRACE_MS = 30 * 60 * 1000;
 const XUID_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60;
@@ -68,12 +69,7 @@ export async function handleCardRequest(request, response) {
       titleName: "Configuration needed",
       fetchedAt: new Date().toISOString(),
     });
-    sendSvg(
-      response,
-      400,
-      renderCard(presence),
-      60,
-    );
+    sendSvg(response, 400, renderCard(presence), 60);
     return;
   }
 
@@ -100,7 +96,9 @@ export async function handleCardRequest(request, response) {
   const hasSessionTimer = hasVisibleSessionTimer(cached.value);
 
   if (!bypassCache && !hasSessionTimer) {
-    const cachedSvg = await timePerf(perf, "svgGet", () => cache.getValue(svgCacheKey));
+    const cachedSvg = await timePerf(perf, "svgGet", () =>
+      cache.getValue(svgCacheKey),
+    );
     if (cachedSvg?.body && !isTimerSvgCacheValue(cachedSvg)) {
       logInfo(`[card] cache=svg gt=${gamertag}`);
       sendSvg(
@@ -182,10 +180,13 @@ export async function handleCardRequest(request, response) {
         `Stale refresh failed for ${gamertag}; serving stale presence: ${formatError(error)}`,
       );
       const stalePresence = await timePerf(perf, "ensureRenderable", () =>
-        ensureRenderablePresence({
-          ...cached.value,
-          stale: true,
-        }, perf),
+        ensureRenderablePresence(
+          {
+            ...cached.value,
+            stale: true,
+          },
+          perf,
+        ),
       );
       await sendRenderedSvg(
         response,
@@ -249,24 +250,20 @@ export async function handleCardRequest(request, response) {
     }
 
     const presence = await timePerf(perf, "ensureRenderable", () =>
-      ensureRenderablePresence({
-        gamertag,
-        isOnline: false,
-        status: "Provider unavailable",
-        titleName: "OpenXBL unavailable",
-        fetchedAt: new Date().toISOString(),
-      }, perf),
+      ensureRenderablePresence(
+        {
+          gamertag,
+          isOnline: false,
+          status: "Provider unavailable",
+          titleName: "OpenXBL unavailable",
+          fetchedAt: new Date().toISOString(),
+        },
+        perf,
+      ),
     );
     const body = await timePerf(perf, "render", () => renderCard(presence));
-    sendSvg(
-      response,
-      200,
-      body,
-      60,
-    );
-    logWarn(
-      `Provider request failed for ${gamertag}: ${formatError(error)}`,
-    );
+    sendSvg(response, 200, body, 60);
+    logWarn(`Provider request failed for ${gamertag}: ${formatError(error)}`);
     logPerfTrace(perf, {
       gamertag,
       source: "provider-error",
@@ -289,16 +286,23 @@ export async function refreshAllowedGamertags({ force = true } = {}) {
       const cached = force
         ? { status: "miss", value: null }
         : await cache.get(cacheKey);
-      const presence = cached.status === "fresh"
-        ? await ensureRenderablePresence(cached.value)
-        : await cache.refresh(cacheKey, () => loadPresence(gamertag, false));
+      const presence =
+        cached.status === "fresh"
+          ? await ensureRenderablePresence(cached.value)
+          : await cache.refresh(cacheKey, () => loadPresence(gamertag, false));
 
       const maxAgeSeconds = getResponseMaxAgeSeconds(presence);
       await cacheRenderedSvg({
         body: renderCard(presence),
         maxAgeSeconds,
-        svgCacheKey: getSvgCacheKeyForPresence(getSvgCacheKey(cacheKey), presence),
-        svgBackupCacheKey: getSvgBackupCacheKeyForPresence(getSvgBackupCacheKey(cacheKey), presence),
+        svgCacheKey: getSvgCacheKeyForPresence(
+          getSvgCacheKey(cacheKey),
+          presence,
+        ),
+        svgBackupCacheKey: getSvgBackupCacheKeyForPresence(
+          getSvgBackupCacheKey(cacheKey),
+          presence,
+        ),
       });
 
       logCardResult(force ? "cron=refresh" : `cron=${cached.status}`, presence);
@@ -312,9 +316,7 @@ export async function refreshAllowedGamertags({ force = true } = {}) {
         elapsedMs: Date.now() - startedAt,
       });
     } catch (error) {
-      logWarn(
-        `[cron] refresh failed gt=${gamertag}: ${formatError(error)}`,
-      );
+      logWarn(`[cron] refresh failed gt=${gamertag}: ${formatError(error)}`);
       results.push({
         gamertag,
         ok: false,
@@ -334,13 +336,12 @@ export async function refreshAllowedGamertags({ force = true } = {}) {
 
 async function loadPresence(gamertag, useMock, perf = null) {
   if (useMock) {
-    const [
-      titleArtUrl,
-      titleHeroUrl,
-    ] = await timePerf(perf, "mockImages", () => Promise.all([
-      readLocalImageDataUri("mock_halo_cover.jpg"),
-      readLocalImageDataUri("mock_halo_hero.jpg"),
-    ]));
+    const [titleArtUrl, titleHeroUrl] = await timePerf(perf, "mockImages", () =>
+      Promise.all([
+        readLocalImageDataUri("mock_halo_cover.jpg"),
+        readLocalImageDataUri("mock_halo_hero.jpg"),
+      ]),
+    );
     return applyArtworkPolicy({
       provider: "mock",
       gamertag,
@@ -362,26 +363,29 @@ async function loadPresence(gamertag, useMock, perf = null) {
     });
   }
 
-  const presence = await timePerf(perf, "openxbl", () => getOpenXblPresence(gamertag, perf));
+  const presence = await timePerf(perf, "openxbl", () =>
+    getOpenXblPresence(gamertag, perf),
+  );
   const localClassification = classifyActivity({
     titleId: presence.titleId,
     titleName: presence.titleName,
   });
-  const shouldLookupTitleArt = localClassification.activityReason !== "known-xbox-app";
+  const shouldLookupTitleArt =
+    localClassification.activityReason !== "known-xbox-app";
   const art = shouldLookupTitleArt
     ? await timePerf(perf, "titleArt", () =>
-      getTitleArt({
-        titleId: presence.titleId,
-        titleName: presence.titleName,
-      }).catch((error) => {
-        if (shouldWarnForTitleArtFailure(localClassification)) {
-          logWarn(
-            `Title art lookup failed for ${presence.titleName || presence.titleId}: ${formatError(error)}`,
-          );
-        }
-        return null;
-      }),
-    )
+        getTitleArt({
+          titleId: presence.titleId,
+          titleName: presence.titleName,
+        }).catch((error) => {
+          if (shouldWarnForTitleArtFailure(localClassification)) {
+            logWarn(
+              `Title art lookup failed for ${presence.titleName || presence.titleId}: ${formatError(error)}`,
+            );
+          }
+          return null;
+        }),
+      )
     : null;
 
   const enrichedPresence = {
@@ -410,12 +414,16 @@ async function loadPresence(gamertag, useMock, perf = null) {
     embedPresenceArtwork(classifiedPresence),
   );
 
-  return timePerf(perf, "history", () => attachPresenceHistory(embeddedPresence, perf));
+  return timePerf(perf, "history", () =>
+    attachPresenceHistory(embeddedPresence, perf),
+  );
 }
 
 async function getOpenXblPresence(gamertag, perf = null) {
   const xuidCacheKey = getXuidCacheKey(gamertag);
-  const cachedIdentity = await timePerf(perf, "xuidGet", () => cache.getValue(xuidCacheKey));
+  const cachedIdentity = await timePerf(perf, "xuidGet", () =>
+    cache.getValue(xuidCacheKey),
+  );
   if (cachedIdentity?.xuid) {
     try {
       const presence = await timePerf(perf, "xuidPresence", () =>
@@ -501,9 +509,7 @@ function isAllowedGamertag(gamertag) {
 }
 
 function getAllowedGamertags() {
-  return new Set(
-    getConfiguredGamertags().map((value) => value.toLowerCase()),
-  );
+  return new Set(getConfiguredGamertags().map((value) => value.toLowerCase()));
 }
 
 function getConfiguredGamertags() {
@@ -528,45 +534,45 @@ function getXuidCacheKey(gamertag) {
 }
 
 function shouldWarnForTitleArtFailure(classification) {
-  return classification.activityKind === "unknown"
-    || classification.activityReason === "microsoft-store-games-search";
+  return (
+    classification.activityKind === "unknown" ||
+    classification.activityReason === "microsoft-store-games-search"
+  );
 }
 
 async function embedPresenceArtwork(presence) {
   const resolvedPresence = applyArtworkPolicy(presence);
   const shouldResolveAvatar = shouldEmbedAvatarArtwork(resolvedPresence);
   const resolveArtworkUrl = createArtworkUrlResolver();
-  const [
-    titleArtUrl,
-    titleHeroUrl,
-    avatarUrl,
-    coverImageUrl,
-    featureImageUrl,
-  ] = await Promise.all([
-    resolveArtworkUrl(presence.titleArtUrl, {
-      purpose: "cover",
-      width: 256,
-      height: 256,
-    }),
-    resolveArtworkUrl(presence.titleHeroUrl, {
-      purpose: "hero",
-      width: 640,
-      height: 360,
-    }),
-    shouldResolveAvatar
-      ? resolveArtworkUrl(presence.avatarUrl, {
-        purpose: "avatar",
+  const [titleArtUrl, titleHeroUrl, avatarUrl, coverImageUrl, featureImageUrl] =
+    await Promise.all([
+      resolveArtworkUrl(presence.titleArtUrl, {
+        purpose: "cover",
         width: 256,
         height: 256,
-      })
-      : Promise.resolve(presence.avatarUrl || ""),
-    resolveArtworkUrl(resolvedPresence.coverImageUrl, {
-      purpose: resolvedPresence.coverSource === "avatar" ? "avatar" : "cover",
-      width: 256,
-      height: 256,
-    }),
-    resolveArtworkUrl(resolvedPresence.featureImageUrl, getArtworkSize(resolvedPresence.featureSource)),
-  ]);
+      }),
+      resolveArtworkUrl(presence.titleHeroUrl, {
+        purpose: "hero",
+        width: 640,
+        height: 360,
+      }),
+      shouldResolveAvatar
+        ? resolveArtworkUrl(presence.avatarUrl, {
+            purpose: "avatar",
+            width: 256,
+            height: 256,
+          })
+        : Promise.resolve(presence.avatarUrl || ""),
+      resolveArtworkUrl(resolvedPresence.coverImageUrl, {
+        purpose: resolvedPresence.coverSource === "avatar" ? "avatar" : "cover",
+        width: 256,
+        height: 256,
+      }),
+      resolveArtworkUrl(
+        resolvedPresence.featureImageUrl,
+        getArtworkSize(resolvedPresence.featureSource),
+      ),
+    ]);
 
   return {
     ...resolvedPresence,
@@ -622,7 +628,9 @@ async function resolveImageDataUri(url, request) {
     if (!config.noImageCache) {
       const cached = await cache.getValue(cacheKey);
       if (cached?.dataUri) {
-        logInfo(`[image] hit ${shortImageUrl(imageUrl)} ms=${Date.now() - startedAt}`);
+        logInfo(
+          `[image] hit ${shortImageUrl(imageUrl)} ms=${Date.now() - startedAt}`,
+        );
         return cached.dataUri;
       }
     }
@@ -630,7 +638,9 @@ async function resolveImageDataUri(url, request) {
     try {
       const dataUri = await fetchImageDataUriWithRetry(imageUrl);
       if (config.noImageCache) {
-        logInfo(`[image] bypass ${shortImageUrl(imageUrl)} bytes=${dataUri.length} ms=${Date.now() - startedAt}`);
+        logInfo(
+          `[image] bypass ${shortImageUrl(imageUrl)} bytes=${dataUri.length} ms=${Date.now() - startedAt}`,
+        );
       } else {
         await cache.setValue(cacheKey, { dataUri }, IMAGE_DATA_TTL_SECONDS);
         await cache.setValue(
@@ -638,17 +648,23 @@ async function resolveImageDataUri(url, request) {
           { imageUrl },
           IMAGE_DATA_TTL_SECONDS,
         );
-        logInfo(`[image] cached ${shortImageUrl(imageUrl)} bytes=${dataUri.length} ms=${Date.now() - startedAt}`);
+        logInfo(
+          `[image] cached ${shortImageUrl(imageUrl)} bytes=${dataUri.length} ms=${Date.now() - startedAt}`,
+        );
       }
       return dataUri;
     } catch (error) {
       const hasNextCandidate = index < candidates.length - 1;
       if (hasNextCandidate) {
-        logWarn(`Image candidate failed for ${shortImageUrl(imageUrl)}: ${formatError(error)}; trying fallback`);
+        logWarn(
+          `Image candidate failed for ${shortImageUrl(imageUrl)}: ${formatError(error)}; trying fallback`,
+        );
         continue;
       }
 
-      logWarn(`Image data cache failed for ${shortImageUrl(imageUrl)}: ${formatError(error)} ms=${Date.now() - startedAt}`);
+      logWarn(
+        `Image data cache failed for ${shortImageUrl(imageUrl)}: ${formatError(error)} ms=${Date.now() - startedAt}`,
+      );
       return "";
     }
   }
@@ -728,10 +744,12 @@ function logPerfTrace(trace, details = {}) {
     details.gamertag ? `gt=${details.gamertag}` : "",
     details.source ? `source=${details.source}` : "",
     details.cacheStatus ? `presence=${details.cacheStatus}` : "",
-    details.online === undefined ? "" : `online=${details.online ? "yes" : "no"}`,
+    details.online === undefined
+      ? ""
+      : `online=${details.online ? "yes" : "no"}`,
     details.kind ? `kind=${details.kind}` : "",
     `region=${process.env.VERCEL_REGION ?? "unknown"}`,
-    `cacheType=${cache?.primary ? cache.primary.constructor.name : cache?.constructor?.name ?? "unknown"}`,
+    `cacheType=${cache?.primary ? cache.primary.constructor.name : (cache?.constructor?.name ?? "unknown")}`,
     `total=${totalMs}`,
   ];
 
@@ -760,7 +778,7 @@ function getCacheSource({ forceRefresh, bypassCache }) {
 
 function getResponseMaxAgeSeconds(
   presence,
-  fallbackSeconds = config.cacheTtlSeconds,
+  fallbackSeconds = NON_TIMER_RESPONSE_TTL_SECONDS,
 ) {
   if (hasVisibleSessionTimer(presence)) {
     return PLAY_SESSION_RESPONSE_TTL_SECONDS;
@@ -771,9 +789,7 @@ function getResponseMaxAgeSeconds(
 
 function hasVisibleSessionTimer(presence) {
   return Boolean(
-    presence?.isOnline
-      && isGameActivity(presence)
-      && presence.sessionStartedAt,
+    presence?.isOnline && isGameActivity(presence) && presence.sessionStartedAt,
   );
 }
 
@@ -820,7 +836,11 @@ async function cacheRenderedSvg({
     maxAgeSeconds,
     renderedAt: new Date().toISOString(),
   };
-  await cache.setValue(svgCacheKey, value, getSvgCacheTtlSeconds(maxAgeSeconds));
+  await cache.setValue(
+    svgCacheKey,
+    value,
+    getSvgCacheTtlSeconds(maxAgeSeconds),
+  );
 
   if (svgBackupCacheKey) {
     await cache.setValue(svgBackupCacheKey, value, SVG_BACKUP_TTL_SECONDS);
@@ -854,8 +874,9 @@ async function getReusableBackupSvg({
 
 function isTimerSvgCacheValue(value) {
   return Boolean(
-    value?.body
-      && getCacheHeaderSeconds(value.maxAgeSeconds) <= PLAY_SESSION_RESPONSE_TTL_SECONDS,
+    value?.body &&
+    getCacheHeaderSeconds(value.maxAgeSeconds) <=
+      PLAY_SESSION_RESPONSE_TTL_SECONDS,
   );
 }
 
@@ -870,11 +891,13 @@ function shortImageUrl(url) {
 
 function shouldEmbedImage(url) {
   const value = String(url ?? "");
-  return value.startsWith("https://store-images.s-microsoft.com/")
-    || value.startsWith("https://images-eds-ssl.xboxlive.com/")
-    || value.startsWith("https://images-eds.xboxlive.com/")
-    || value.startsWith("https://avatar-ssl.xboxlive.com/")
-    || value.startsWith("https://avatar.xboxlive.com/");
+  return (
+    value.startsWith("https://store-images.s-microsoft.com/") ||
+    value.startsWith("https://images-eds-ssl.xboxlive.com/") ||
+    value.startsWith("https://images-eds.xboxlive.com/") ||
+    value.startsWith("https://avatar-ssl.xboxlive.com/") ||
+    value.startsWith("https://avatar.xboxlive.com/")
+  );
 }
 
 function isLocalImageUrl(url) {
@@ -892,7 +915,9 @@ async function getPrioritizedImageDataUriCandidates(url, request) {
     return candidates;
   }
 
-  const cachedCandidate = await cache.getValue(getImageCandidateCacheKey(url, request));
+  const cachedCandidate = await cache.getValue(
+    getImageCandidateCacheKey(url, request),
+  );
   const cachedImageUrl = cachedCandidate?.imageUrl;
   if (!cachedImageUrl || !candidates.includes(cachedImageUrl)) {
     return candidates;
@@ -925,7 +950,8 @@ async function fetchImageDataUri(url) {
   const response = await fetch(url, {
     signal: controller.signal,
     headers: {
-      "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+      Accept:
+        "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
       "User-Agent": "XboxNowPlayingTracker/0.1",
     },
   }).finally(() => clearTimeout(timeout));
@@ -949,12 +975,14 @@ async function fetchImageDataUri(url) {
 
 function isRetryableImageError(error) {
   const message = error?.message || String(error);
-  return error?.name === "AbortError"
-    || message.includes("aborted")
-    || message.includes("fetch failed")
-    || message.includes("image request failed: 408")
-    || message.includes("image request failed: 429")
-    || /image request failed: 5\d\d/.test(message);
+  return (
+    error?.name === "AbortError" ||
+    message.includes("aborted") ||
+    message.includes("fetch failed") ||
+    message.includes("image request failed: 408") ||
+    message.includes("image request failed: 429") ||
+    /image request failed: 5\d\d/.test(message)
+  );
 }
 
 function delay(ms) {
@@ -984,9 +1012,7 @@ async function attachPresenceHistory(presence, perf = null) {
       activityKind: presence.activityKind || "",
     };
     const sessionKey = getPlaySessionKey(presence);
-    const [
-      existingSessionValue,
-    ] = await Promise.all([
+    const [existingSessionValue] = await Promise.all([
       timePerf(perf, "sessionGet", () => cache.getValue(sessionKey)),
       timePerf(perf, "lastSeenSet", () =>
         cache.setValue(lastSeenKey, lastSeen, LAST_SEEN_TTL_SECONDS),
@@ -1041,7 +1067,9 @@ async function attachPresenceHistory(presence, perf = null) {
     new Date().toISOString(),
   );
 
-  const lastSeen = await timePerf(perf, "lastSeenGet", () => cache.getValue(lastSeenKey));
+  const lastSeen = await timePerf(perf, "lastSeenGet", () =>
+    cache.getValue(lastSeenKey),
+  );
   if (!lastSeen) {
     return presence;
   }
@@ -1067,10 +1095,10 @@ async function markCurrentGameSessionAway(
     await cache.getValue(currentGameSessionKey),
   );
   if (
-    !currentSession
-    || !currentSession.sessionKey
-    || currentSession.sessionKey === exceptSessionKey
-    || currentSession.awayObservedAt
+    !currentSession ||
+    !currentSession.sessionKey ||
+    currentSession.sessionKey === exceptSessionKey ||
+    currentSession.awayObservedAt
   ) {
     return;
   }
@@ -1173,9 +1201,13 @@ function getLastSeenKey(presence) {
   return `last-seen:${playerKey}`;
 }
 
-function sendSvg(response, statusCode, body, maxAgeSeconds, {
-  revalidateEveryRequest = false,
-} = {}) {
+function sendSvg(
+  response,
+  statusCode,
+  body,
+  maxAgeSeconds,
+  { revalidateEveryRequest = false } = {},
+) {
   const clientMaxAgeSeconds = getCacheHeaderSeconds(maxAgeSeconds);
   const sharedMaxAgeSeconds = getSharedCacheHeaderSeconds(clientMaxAgeSeconds);
 
@@ -1184,7 +1216,8 @@ function sendSvg(response, statusCode, body, maxAgeSeconds, {
   response.setHeader("Content-Length", Buffer.byteLength(body));
 
   if (revalidateEveryRequest) {
-    const revalidateCacheControl = "no-cache, max-age=0, must-revalidate";
+    const revalidateCacheControl =
+      "no-cache, no-store, must-revalidate, max-age=0";
     response.setHeader("Cache-Control", revalidateCacheControl);
     response.setHeader("CDN-Cache-Control", revalidateCacheControl);
     response.setHeader("Vercel-CDN-Cache-Control", revalidateCacheControl);
@@ -1230,7 +1263,7 @@ function getSharedCacheHeaderSeconds(value) {
     return seconds;
   }
 
-  return Math.max(SVG_SHARED_CACHE_MIN_SECONDS, config.cacheTtlSeconds, seconds);
+  return Math.max(SVG_SHARED_CACHE_MIN_SECONDS, seconds);
 }
 
 function formatError(error) {
