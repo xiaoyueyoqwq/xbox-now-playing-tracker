@@ -15,11 +15,11 @@ importers:
         specifier: ^2.0.0
         version: 2.0.0
       react:
-        specifier: ^19.2.6
-        version: 19.2.6
+        specifier: ^19.2.7
+        version: 19.2.7
       react-dom:
         specifier: ^19.2.6
-        version: 19.2.6(react@19.2.6)
+        version: 19.2.6(react@19.2.7)
       redis:
         specifier: ^5.12.1
         version: 5.12.1
@@ -78,8 +78,8 @@ packages:
     peerDependencies:
       react: ^19.2.6
 
-  react@19.2.6:
-    resolution: {integrity: sha512-sfWGGfavi0xr8Pg0sVsyHMAOziVYKgPLNrS7ig+ivMNb3wbCBw3KxtflsGBAwD3gYQlE/AEZsTLgToRrSCjb0Q==}
+  react@19.2.7:
+    resolution: {integrity: sha512-HNe9WslTbXmFK8o8cmwgAeJFSBvt1bPdHCVKtaaV+WlAN36mpT4hcRpwbf3fY56ar2oIXzsBpOAiIRHAdY0OlQ==}
     engines: {node: '>=0.10.0'}
 
   redis@5.12.1:
@@ -122,12 +122,12 @@ snapshots:
 
   opentype.js@2.0.0: {}
 
-  react-dom@19.2.6(react@19.2.6):
+  react-dom@19.2.6(react@19.2.7):
     dependencies:
-      react: 19.2.6
+      react: 19.2.7
       scheduler: 0.27.0
 
-  react@19.2.6: {}
+  react@19.2.7: {}
 
   redis@5.12.1:
     dependencies:
