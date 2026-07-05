@@ -1,5 +1,6 @@
 # Xbox Now Playing Tracker
 
+<img width="1920" height="1080" alt="chrome_fD1YczewGf" src="https://github.com/user-attachments/assets/f4440e32-63b6-4750-858f-6a7b5a9c2671" />
 An embeddable Xbox presence card for GitHub profiles and other Markdown surfaces.
 
 ```md
@@ -13,6 +14,8 @@ Open the deployment root URL to generate Markdown and HTML embed snippets:
 ```text
 https://your-project.vercel.app/
 ```
+
+Also you can check already deployed card status in my [github profile](https://github.com/xiaoyueyoqwq)
 
 ## API Shape
 
