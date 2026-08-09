@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@upstash/redis':
-        specifier: ^1.38.0
-        version: 1.38.0
+        specifier: ^1.38.2
+        version: 1.38.2
       opentype.js:
         specifier: ^2.0.0
         version: 2.0.0
@@ -62,8 +62,8 @@ packages:
     peerDependencies:
       '@redis/client': ^5.12.1
 
-  '@upstash/redis@1.38.0':
-    resolution: {integrity: sha512-wu+dZBptlLy0+MCUEoHmzrY/TnmgDey3+c7EbIGwrLqAvkP8yi5MWZHYGIFtAygmL4Bkz2TdFu+eU0vFPncIcg==}
+  '@upstash/redis@1.38.2':
+    resolution: {integrity: sha512-RZ+JaRCVIS+ZTGnjOnDMr+/0aqDxsBb5rV6aW+Pys4SGELwr5lwE3UbLHRCHqMQ5Ulxj0b/CFBHfbmE175Otog==}
 
   cluster-key-slot@1.1.2:
     resolution: {integrity: sha512-RMr0FhtfXemyinomL4hrWcYJxmX6deFdCxpJzhDttxgO1+bcCnkk+9drydLVDmAMG7NE6aN/fl4F7ucU/90gAA==}
@@ -114,7 +114,7 @@ snapshots:
     dependencies:
       '@redis/client': 5.12.1
 
-  '@upstash/redis@1.38.0':
+  '@upstash/redis@1.38.2':
     dependencies:
       uncrypto: 0.1.3
 

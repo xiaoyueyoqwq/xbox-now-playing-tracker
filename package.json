@@ -16,7 +16,7 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@upstash/redis": "^1.38.0",
+    "@upstash/redis": "^1.38.2",
     "opentype.js": "^2.0.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
